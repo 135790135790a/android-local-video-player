@@ -1,0 +1,39 @@
+# 本地工具链（JDK / Android SDK / Gradle 缓存），体积巨大，与源码无关
+_tools/
+_tools*/
+
+# Gradle / AGP 构建产物
+build/
+.gradle/
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# 本地环境配置
+local.properties
+.env
+.github_token
+
+# 签名材料：绝对不要提交
+keystore.properties
+*.jks
+*.keystore
+*.pepk
+AndroidVideoPlayer/keystore/
+
+# IDE / 编辑器
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 本机环境搭建的临时脚本与日志
+_*.py
+_*.log
+_sdk_install.log
+_sdk_build.log

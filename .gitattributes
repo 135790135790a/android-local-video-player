@@ -1,0 +1,12 @@
+# 统一换行符，避免 Windows 检出后 gradlew 失效
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制文件不做换行转换
+*.jar binary
+*.png binary
+*.webp binary
+*.apk binary
+*.jks binary
+*.keystore binary
