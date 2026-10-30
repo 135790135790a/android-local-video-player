@@ -1,18 +1,21 @@
 # 本地视频播放器（Local Video Player）
 
-单 Activity 的本地视频播放器：SAF 选片 → Media3 ExoPlayer 播放 → Compose Material 3 控制界面。
-深色主题、手机/平板横竖屏自适应、全程不申请存储权限。
+单 Activity 的本地视频播放器：**导入进媒体库 → 播放 → Compose Material 3 控制界面**。
+从相册或 SAF 选择的视频会复制到应用私有目录，之后播放只认本地 File，不再依赖 `content://` 授权；
+导入前做两级可播放性校验（容器/编码探测），不支持的格式在列表里直接标注。
+深色主题、手机/平板横竖屏自适应；相册权限按 Android 12 / 13 / 14 三档适配，SAF 作为「不申请任何存储权限」的降级入口。
 
 | 项目 | 值 |
 | --- | --- |
 | 包名 / applicationId | `com.example.videoplayer` |
-| versionCode / versionName | `1` / `1.0.0` |
+| versionCode / versionName | `3` / `1.0.2` |
 | minSdk / targetSdk / compileSdk | `24` / `34` / `34` |
 | 语言 / UI | Kotlin + Jetpack Compose + Material 3 |
-| 架构 | MVVM（`AndroidViewModel` + `StateFlow`） |
+| 架构 | MVVM（`AndroidViewModel` + `StateFlow`）+ Room + WorkManager |
 | 播放内核 | `androidx.media3:media3-exoplayer` + `media3-ui` 1.4.1 |
+| 数据层 | Room 2.6.1（KSP）、WorkManager 2.9.1、Coil 2.7.0（coil-compose + coil-video） |
 | Gradle | AGP 8.5.2 / Gradle 8.7 / Kotlin 2.0.21 / JVM 17 |
-| release APK | `VideoPlayer-1.0.0-release.apk`，2.6 MB，APK Signature Scheme v2 |
+| release APK | `VideoPlayer-1.0.2-release.apk`，约 3.0 MB，APK Signature Scheme v2 |
 
 ---
 
@@ -20,11 +23,14 @@
 
 | 需求 | 实现位置 | 说明 |
 | --- | --- | --- |
-| SAF 选视频（`video/*`） | `ui/home/HomeScreen.kt` | `ActivityResultContracts.OpenDocument`，MIME 只传 `video/*` |
-| 持久化 URI 授权 | `ui/home/HomeScreen.kt` | `takePersistableUriPermission(uri, FLAG_GRANT_READ_URI_PERMISSION)`，重启后仍可续播 |
+| SAF 选视频（`video/*`，降级入口） | `ui/AppRoot.kt` | `ActivityResultContracts.OpenDocument`，MIME 只传 `video/*`，拿到后直接入库 |
+| 持久化 URI 授权 | `ui/AppRoot.kt` | `takePersistableUriPermission(...)`；入库复制完成后即使授权失效也能播放 |
 | 读取文件名/大小/时长 | `data/VideoMetaReader.kt` | `OpenableColumns.DISPLAY_NAME/SIZE` + `MediaStore.MediaColumns.DURATION`，size 为 0 时用 `openAssetFileDescriptor` 兜底 |
-| 最近 5 个视频 | `data/RecentVideoStore.kt` | SharedPreferences + `org.json`，按 `lastPlayedAt` 倒序去重，`MAX_ITEMS = 5` |
-| 无视频引导页 | `ui/home/HomeScreen.kt` | `EmptyState`：图标 + 文案 + “选择视频”按钮 |
+| **媒体入库（v1.0.2）** | `data/MediaLibrary.kt` + `work/ImportWorker.kt` | 复制到 `getExternalFilesDir(MOVIES)/library`，同名加 `(1)` 后缀，写前查空间留 32MB |
+| **媒体库列表（v1.0.2）** | `ui/library/LibraryScreen.kt` | 网格封面 + 时长/分辨率角标 + 大小/编码，顶部三格占用统计 |
+| **视频信息面板（v1.0.2）** | `ui/library/VideoInfoSheet.kt` | 分辨率/帧率/码率/编码/容器/时长/大小/导入时间/路径，可一键删除 |
+| **后台导入进度（v1.0.2）** | `ui/library/LibraryViewModel.kt` | `workManager.getWorkInfoByIdFlow` 驱动进度卡片，支持取消 |
+| **重复导入去重（v1.0.2）** | `work/ImportWorker.kt` | 文件名+大小+mtime 一重，前 1MB MD5 二重 |
 | 播放/暂停、点画面切换 | `PlayerViewModel.togglePlayPause()` / `PlayerScreen` | 单击＝控件可见时切换、控件隐藏时先唤出；双击＝直接切换 |
 | 暂停时中央大播放按钮 | `PlayerControls.CenterPlayButton` | 76dp `FilledIconButton`，仅在暂停且控件可见时显示 |
 | 进度条（拖动只改文字、松手才 seek） | `PlayerControls.ProgressRow` | 拖动期间只更新本地 `dragValue`，`onValueChangeFinished` 才 `onSeek` |
@@ -45,6 +51,11 @@
 | 音频焦点 | `PlayerViewModel.requestAudioFocus()` | `AudioFocusRequest`（API 26+）/ `requestAudioFocus`（旧 API）；LOSS 暂停、LOSS_TRANSIENT 记录、GAIN 恢复 |
 | 错误中文映射 | `player/PlaybackErrorMapper.kt` | `ERROR_CODE_DECODING_FAILED` → “该视频的编码格式不被支持…”；`IO_*`、`PARSING_*`、`DRM_*` 等逐条映射 |
 | BUFFERING 显示 loading | `PlayerScreen` | `state.isBuffering` → 中央 `CircularProgressIndicator` |
+| **相册浏览（v1.0.1）** | `ui/gallery/GalleryScreen.kt` | MediaStore 查全部视频，3 列（横屏 5 列）网格 + Coil 视频首帧缩略图 + 下拉刷新 |
+| **可播放性预检（v1.0.1）** | `data/PlayabilityChecker.kt` | 一级静态校验 + 二级 MediaCodec 解码器探测，不通过弹窗说明并可「仍要尝试播放」 |
+| **权限三档适配（v1.0.1）** | `ui/gallery/GalleryViewModel.kt` | 13+ `READ_MEDIA_VIDEO` / 14+ 部分授权 `READ_MEDIA_VISUAL_USER_SELECTED` / ≤12 `READ_EXTERNAL_STORAGE` |
+| **预检结果缓存（v1.0.1）** | `data/PlayabilityChecker.kt` | key = Uri + size + mtime，`ConcurrentHashMap` 内存缓存，避免重复解封装 |
+| **静音降级（v1.0.1）** | `PlayerViewModel` + `PlayabilityChecker` | 视频轨可解、音频轨无解码器时静音播放并 Toast 提示 |
 
 ---
 
@@ -53,7 +64,8 @@
 ```
 视频播放器/                                  ← 工作区根目录
 ├── README.md                               ← 本文档
-├── VideoPlayer-1.0.0-release.apk           ← 已构建好的签名安装包（2.6 MB）
+├── VideoPlayer-1.0.2-release.apk           ← 已构建好的签名安装包（约 3.0 MB）
+├── CHANGELOG.md                            ← 版本变更记录（v1.0.0 → v1.0.2）
 ├── AndroidVideoPlayer/                     ← Gradle 工程根
 │   ├── settings.gradle.kts                 仓库配置（阿里云/腾讯镜像）
 │   ├── build.gradle.kts                    顶层插件声明
@@ -68,30 +80,53 @@
 │   │       ├── gradle-wrapper.jar
 │   │       └── gradle-wrapper.properties
 │   └── app/
-│       ├── build.gradle.kts                应用模块（签名、混淆、依赖）
+│       ├── build.gradle.kts                应用模块（签名、混淆、依赖、KSP）
 │       ├── proguard-rules.pro              Media3 混淆规则
 │       └── src/main/
-│           ├── AndroidManifest.xml         清单（唯一权限 MODIFY_AUDIO_SETTINGS）
+│           ├── AndroidManifest.xml         清单（相册权限三档 + MODIFY_AUDIO_SETTINGS）
 │           ├── java/com/example/videoplayer/
-│           │   ├── MainActivity.kt         宿主 Activity、生命周期转发
+│           │   ├── MainActivity.kt         宿主 Activity、生命周期转发、旧数据迁移
 │           │   ├── data/
-│           │   │   ├── RecentVideo.kt      最近播放数据模型
-│           │   │   ├── RecentVideoStore.kt 最近播放持久化（SP + JSON）
-│           │   │   └── VideoMetaReader.kt  ContentResolver 元数据读取
+│           │   │   ├── MediaLibrary.kt     ★ 私有目录复制 / 空间检查 / 重名 / 校验和
+│           │   │   ├── VideoProbe.kt       MediaExtractor + Retriever 探测分辨率与编码
+│           │   │   ├── VideoMetaReader.kt  ContentResolver 元数据读取
+│           │   │   ├── LegacyMigrator.kt   v1.0.1「最近播放」→ 媒体库迁移
+│           │   │   ├── RecentVideo.kt      旧「最近播放」模型（仅迁移用）
+│           │   │   ├── RecentVideoStore.kt 旧「最近播放」持久化（仅迁移用）
+│           │   │   ├── GalleryVideo.kt     相册视频模型
+│           │   │   ├── GalleryRepository.kt MediaStore 查询（IO 线程）
+│           │   │   ├── Playability.kt      预检结果 sealed 类型
+│           │   │   ├── PlayabilityChecker.kt 两级可播放性校验 + 缓存
+│           │   │   └── db/
+│           │   │       ├── VideoEntity.kt  Room 实体（含 resolutionLabel 计算属性）
+│           │   │       ├── VideoDao.kt     DAO（Flow 查询 + 去重查找）
+│           │   │       └── AppDatabase.kt  Room 数据库单例
+│           │   ├── work/
+│           │   │   └── ImportWorker.kt     ★ WorkManager 入库任务（复制/去重/探测/写库）
 │           │   ├── player/
 │           │   │   ├── PlaybackErrorMapper.kt  PlaybackException → 中文提示
 │           │   │   └── PlayerViewModel.kt      ★ 播放器状态机（ExoPlayer 持有者）
 │           │   ├── ui/
-│           │   │   ├── AppRoot.kt          首页 / 播放页切换
-│           │   │   ├── home/HomeScreen.kt  选片、引导页、最近列表
+│           │   │   ├── AppRoot.kt          首页（媒体库 / 相册 两个 Tab）+ 播放页切换
+│           │   │   ├── gallery/
+│           │   │   │   ├── GalleryScreen.kt    相册页（已退化为导入来源）
+│           │   │   │   └── GalleryViewModel.kt 相册权限矩阵 + MediaStore 查询
+│           │   │   ├── library/
+│           │   │   │   ├── LibraryScreen.kt    ★ 媒体库网格 + 占用统计 + 导入进度
+│           │   │   │   ├── LibraryViewModel.kt  ★ 媒体库状态（WorkManager 进度）
+│           │   │   │   └── VideoInfoSheet.kt   视频信息底部弹层
 │           │   │   ├── player/
 │           │   │   │   ├── PlayerScreen.kt    ★ 播放页（全屏/自动隐藏/手势编排）
 │           │   │   │   ├── PlayerControls.kt  顶栏、底栏、进度条、倍速、错误弹窗
 │           │   │   │   ├── PlayerGestures.kt  点击/双击/滑动识别层
 │           │   │   │   └── VideoSurface.kt    PlayerView 的 Compose 封装
 │           │   │   └── theme/Theme.kt      深色配色 + 字体
-│           │   ├── util/TimeFormat.kt      时间/体积格式化
-│           │   └── util/CrashGuard.kt      未捕获异常兜底（写崩溃日志）
+│           │   └── util/
+│           │       ├── AppImageLoader.kt   ★ 全局 ImageLoader（注册 VideoFrameDecoder）
+│           │       ├── ContextExt.kt       findActivity 扩展
+│           │       ├── Formatters.kt       体积/码率/帧率/日期格式化
+│           │       ├── TimeFormat.kt       播放进度格式化
+│           │       └── CrashGuard.kt       未捕获异常兜底（写崩溃日志）
 │           └── res/
 │               ├── layout/player_view.xml  PlayerView（texture_view，关内置控制条）
 │               ├── drawable/               ic_pause / ic_volume_{up,down,off} /
@@ -100,6 +135,12 @@
 │               ├── mipmap-*/               ic_launcher(.round) 各密度图标
 │               ├── mipmap-anydpi-v26/      adaptive-icon 定义
 │               └── values/                 strings / colors / themes
+└── _tools/                                 本机构建工具链（JDK17、Gradle、Android SDK，可删）
+    ├── jdk17/                               OpenJDK 17.0.2
+    ├── gradle-8.7/                          Gradle 发行版
+    ├── sdk/                                 Android SDK（platform-tools / platforms/android-34 / build-tools/34.0.0）
+    ├── gradle-home/                         GRADLE_USER_HOME（依赖缓存）
+    └── downloads/                           安装时下载的 zip 原件
 └── _tools/                                 本机构建工具链（JDK17、Gradle、Android SDK，可删）
     ├── jdk17/                               OpenJDK 17.0.2
     ├── gradle-8.7/                          Gradle 发行版
@@ -146,20 +187,30 @@
 
 | 文件 | 作用 / 关键点 |
 | --- | --- |
-| `MainActivity.kt` | `enableEdgeToEdge()` + `setContent { VideoPlayerTheme { AppRoot(viewModel) } }`；`by viewModels<PlayerViewModel>()`；`onStart→onHostStart()`、`onStop→onHostStop()`、`onDestroy` 里**只有非配置变更**才 `releasePlayer()` |
-| `ui/AppRoot.kt` | 不引 navigation-compose：`var showPlayer by rememberSaveable`，`HomeScreen` ↔ `PlayerScreen`；`LaunchedEffect(showPlayer, state.hasVideo)` 在没有媒体时自动回首页 |
-| `ui/home/HomeScreen.kt` | `rememberLauncherForActivityResult(OpenDocument())`；选中后 `takePersistableUriPermission` 再 `viewModel.openVideo(uri)`；`EmptyState` 引导页、`RecentVideoRow`（文件名/大小/时长/相对时间 + 删除）、清空全部；`LazyColumn` 限宽 `760.dp` 适配平板 |
-| `ui/player/PlayerScreen.kt` | 组装 `VideoSurface` + `GestureLayer` + 顶/底栏；`DisposableEffect` 进出全屏时隐藏/恢复系统栏；`DisposableEffect(isPlaying)` 加/清 `FLAG_KEEP_SCREEN_ON`；3 秒自动隐藏；`BackHandler` 先暂停再返回；`Context.findActivity()` 扩展用于拿 Activity |
-| `ui/player/PlayerControls.kt` | `PlayerTopBar`（返回 + 标题，标题 `maxLines=1` 省略）；`PlayerBottomBar`（进度条在上、按钮在下）；`ProgressRow`（Slider + Canvas 缓冲线 + 左右时间）；`VolumeButton`（三档图标）；`SpeedButton`（窄屏只显示图标，宽屏带 “1.5x” 文字 + DropdownMenu）；`CenterPlayButton`；`PlayerErrorDialog`（中文友好提示 + 技术详情 + 重试） |
-| `ui/player/PlayerGestures.kt` | `GestureLayer`：水平拖动累计 ≥48dp 且横向为主 → 松手 `onSeekBy(±10s)`；垂直每 26dp 一格 → `onVolumeStep`；拖动中显示气泡提示（“松开快进 10 秒” / “音量 45%”），松手 800ms 后消失 |
-| `ui/player/VideoSurface.kt` | `AndroidView` 里 inflate `player_view.xml`，`player` 属性在 factory/update 两处都赋值，`onRelease` 里置 null 防泄漏 |
-| `player/PlayerViewModel.kt` | 核心。`val player: ExoPlayer` 单实例；`PlayerUiState`（videoName/uri/isPlaying/isBuffering/isReady/ended/durationMs/positionMs/bufferedMs/speed/volumeLevel/volumePercent/errorMessage/errorDetail）；`recentVideos: StateFlow`；`VolumeLevel{MUTE,LOW,HIGH}`；方法：`openVideo/retry/dismissError/togglePlayPause/play/pause/seekTo/seekBy/setSpeed/cycleVolume/adjustVolumeBy/setVolumePercent/onHostStart/onHostStop/releasePlayer/removeRecent/clearRecent` |
-| `player/PlaybackErrorMapper.kt` | `toUserMessage(PlaybackException)` + `technicalDetail()`，把 `errorCode` 分组成：解码类、容器解析类、IO 类（找不到/无权限/网络）、音轨类、DRM 类（`in 6_000..6_999`）、超时/远端 |
-| `data/RecentVideoStore.kt` | `SharedPreferences("recent_videos")` + `org.json`；`load()/upsert()/remove()/clear()`，`upsert` 按 uri 去重后按 `lastPlayedAt` 倒序 `take(5)` |
-| `data/VideoMetaReader.kt` | `ContentResolver.query` 三列；`runCatching` 包裹；文件名缺失时回退 `uri.lastPathSegment`，大小缺失时用 `openAssetFileDescriptor().length` |
-| `util/TimeFormat.kt` | `toPlaybackTime()`：<1h → `mm:ss`，≥1h → `h:mm:ss`；`toReadableSize()`：B/KB/MB/GB |
-| `util/CrashGuard.kt` | 全局 `UncaughtExceptionHandler`：崩溃堆栈写入 `files/crash/`（最多保留 5 份），下次启动 Toast 提示；**不吞异常**，交回系统默认处理器 |
-| `ui/theme/Theme.kt` | 固定 `darkColorScheme`（primary `#B9A4FF`、background `#0C0C0E`、surface `#121116`…），不做动态取色，保证任何机型都是深色 |
+| `MainActivity.kt` | `enableEdgeToEdge()` + `setContent { VideoPlayerTheme { AppRoot(playerViewModel) } }`；`by viewModels<PlayerViewModel>()`；启动时后台跑 `LegacyMigrator.migrateIfNeeded()`；`onStart→onHostStart()`、`onStop→onHostStop()`、`onDestroy` 里**只有非配置变更**才 `releasePlayer()` |
+| `ui/AppRoot.kt` | 不引 navigation-compose：`TabRow` 切「媒体库 / 相册」，`var showPlayer by rememberSaveable` 切播放页；SAF 选片走 `OpenDocument()` + `takePersistableUriPermission` 后直接 `libraryViewModel.importUris(...)`；相册 `onPlay` 也是入库，完成后 Toast 提示 |
+| `ui/library/LibraryScreen.kt` | 头部标题 + 刷新/导入菜单（DropdownMenu：从相册 / 从文件）；`UsageCard` 三格统计；`ImportBanner`（Running 显示 `LinearProgressIndicator` + 取消，Finished 显示成功/失败/跳过）；空态 `EmptyLibrary`；`LazyVerticalGrid` 3 列（≥600dp 5 列）；`VideoTile` 用 `AppImageLoader` 解首帧 + 时长/分辨率角标 + Info 按钮 + `SOURCE_LOST` 黑罩 |
+| `ui/library/LibraryViewModel.kt` | `videos: StateFlow<List<VideoEntity>>`（`stateIn(WhileSubscribed(5s))`）；`importUris(List<Uri>)` 建 `OneTimeWorkRequest` 并订阅 `getWorkInfoByIdFlow` 映射成 `ImportState`；`deleteVideo`（DB + 文件）、`markPlayed`、`reconcileWithDisk()`（数据库与磁盘对账） |
+| `ui/library/VideoInfoSheet.kt` | `ModalBottomSheet` 展示分辨率/帧率/码率/视频编码/音频编码/容器/时长/大小/导入时间/最后播放/播放次数/本地路径，底部「播放」「删除」，并说明「本地视频是单码率文件」 |
+| `work/ImportWorker.kt` | `CoroutineWorker`：读 `KEY_URIS` → 一重去重（文件名 + 大小 + mtime）→ `copyToLibrary` → MD5 二重去重 → `VideoProbe.probeFile` → `dao.insert`；逐条 `setProgress`，单条失败不阻断整批 |
+| `data/MediaLibrary.kt` | `dir()`（外部私有目录降级内部）、`copyToLibrary()`（流式拷贝 + 空间预检 + 失败删半截）、`uniqueFile()`（重名加 `(1)`）、`checksum()`（前 1MB MD5）、`lastModified()`（Documents / MediaStore 两路兜底） |
+| `data/VideoProbe.kt` | `MediaExtractor` 读轨道 MIME + 码率，`MediaMetadataRetriever` 读宽高/旋转/时长/帧率；`describeCodec()` 映射 H.264 / H.265 / AV1 / VP9 / AAC / Opus… |
+| `data/LegacyMigrator.kt` | 一次性迁移 v1.0.1「最近播放」：可读的复制入库，不可读的插入 `SOURCE_LOST` 占位；用 `media_library` prefs 标记保证幂等 |
+| `data/db/VideoEntity.kt` · `VideoDao.kt` · `AppDatabase.kt` | Room `videos` 表（fileName/localPath/size/durationMs/width/height/frameRate/bitRate/mimeType/videoCodec/audioCodec/sourceUri/importedAt/lastPlayedAt/playCount/checksum/lastModified/status）；DAO 提供 `observeAll` / `findByFingerprint` / `findByChecksum` / `insert` / `markPlayed` / `updateStatus` / `deleteById` |
+| `ui/gallery/GalleryScreen.kt` + `GalleryViewModel.kt` | 相册页：权限三档 + 部分授权提示 + 永久拒绝时引导去设置；MediaStore 查询在 IO 线程；预检不通过灰显「不支持」；点击行为已改为「加入导入队列」 |
+| `data/PlayabilityChecker.kt` · `Playability.kt` · `GalleryRepository.kt` · `GalleryVideo.kt` | 两级预检（静态元数据 + `MediaCodecList` 解码器探测）与结果缓存；MediaStore 投影与 `content://` Uri 生成 |
+| `util/AppImageLoader.kt` | 全局单例 `ImageLoader`，注册 `VideoFrameDecoder`；媒体库与相册封面都走它（否则视频文件当图片解码必失败） |
+| `ui/player/PlayerScreen.kt` | 组装 `VideoSurface` + `GestureLayer` + 顶/底栏；`DisposableEffect` 进出全屏隐藏/恢复系统栏；`DisposableEffect(isPlaying)` 加/清 `FLAG_KEEP_SCREEN_ON`；3 秒自动隐藏；`BackHandler` 先暂停再返回；预检 loading 有 200ms 阈值，错误/拦截用整页遮罩 + `PlayerErrorOverlay` |
+| `ui/player/PlayerControls.kt` | `PlayerTopBar`、`PlayerBottomBar`（进度条在上、按钮在下）、`ProgressRow`（Slider + Canvas 缓冲线）、`VolumeButton`（三档图标）、`SpeedButton`（窄屏只留图标）、`CenterPlayButton`、`PlayerErrorDialog` |
+| `ui/player/PlayerGestures.kt` | `GestureLayer`：水平拖动累计 ≥48dp 且横向为主 → 松手 `onSeekBy(±10s)`；垂直每 26dp 一格 → `onVolumeStep`；拖动中气泡提示，松手 800ms 消失 |
+| `ui/player/VideoSurface.kt` | `AndroidView` 里 inflate `player_view.xml`，`player` 在 factory/update 两处赋值，`onRelease` 置 null 防泄漏 |
+| `player/PlayerViewModel.kt` | 核心。`val player: ExoPlayer` 单实例；`PlayerUiState`；`VideoSource{SAF,GALLERY,RECENT,LIBRARY}`；`PreflightBlock`；`openLibraryVideo(video)` 直接用本地 `File` 播放并跳过预检；方法：`openVideo/retry/playAnyway/dismissPreflightBlock/togglePlayPause/seekTo/seekBy/setSpeed/cycleVolume/onHostStart/onHostStop/releasePlayer` |
+| `player/PlaybackErrorMapper.kt` | `toUserMessage(PlaybackException)` + `technicalDetail()`，把 `errorCode` 分组成：解码类、容器解析类、IO 类、音轨类、DRM 类、超时/远端 |
+| `data/RecentVideoStore.kt` · `RecentVideo.kt` | v1.0.2 起仅用于迁移：`SharedPreferences("recent_videos")` + `org.json`，`load()/upsert()/remove()/clear()` |
+| `data/VideoMetaReader.kt` | `ContentResolver.query` 三列；`runCatching` 包裹；文件名缺失回退 `uri.lastPathSegment`，大小缺失用 `openAssetFileDescriptor().length` |
+| `util/TimeFormat.kt` · `Formatters.kt` | `toPlaybackTime()` / `toReadableSize()`；`bytes/bitRate/frameRate/dateTime/duration` |
+| `util/CrashGuard.kt` | 全局 `UncaughtExceptionHandler`：堆栈写入 `files/crash/`（最多 5 份），下次启动 Toast 提示；**不吞异常** |
+| `ui/theme/Theme.kt` | 固定 `darkColorScheme`（primary `#B9A4FF`、background `#0C0C0E`…），不做动态取色，保证任何机型都是深色 |
 
 ---
 
@@ -358,7 +409,7 @@ cd "$root\AndroidVideoPlayer"
 AndroidVideoPlayer\app\build\outputs\apk\release\app-release.apk
 ```
 
-（`isMinifyEnabled=true` + `isShrinkResources=true` 均已开启，本工程 release 产物 **2.6 MB**。）
+（`isMinifyEnabled=true` + `isShrinkResources=true` 均已开启，v1.0.2 的 release 产物 **约 3.0 MB**；比 v1.0.0 多出来的主要是 Room、WorkManager 与 coil-video。）
 
 ### 5.5 安装到手机
 
@@ -367,7 +418,7 @@ AndroidVideoPlayer\app\build\outputs\apk\release\app-release.apk
 & "$root\_tools\sdk\platform-tools\adb.exe" devices
 & "$root\_tools\sdk\platform-tools\adb.exe" install -r "$root\AndroidVideoPlayer\app\build\outputs\apk\release\app-release.apk"
 # 或直接安装已导出的副本：
-& "$root\_tools\sdk\platform-tools\adb.exe" install -r "$root\VideoPlayer-1.0.0-release.apk"
+& "$root\_tools\sdk\platform-tools\adb.exe" install -r "$root\VideoPlayer-1.0.2-release.apk"
 ```
 
 也可以把 APK 拷进手机点安装（需在系统里允许“安装未知来源应用”）。
@@ -377,8 +428,8 @@ AndroidVideoPlayer\app\build\outputs\apk\release\app-release.apk
 
 ```powershell
 $bt = "$root\_tools\sdk\build-tools\34.0.0"
-& "$bt\apksigner.bat" verify --print-certs "$root\VideoPlayer-1.0.0-release.apk"
-& "$bt\aapt2.exe" dump badging "$root\VideoPlayer-1.0.0-release.apk" | Select-String "package:|sdkVersion|uses-permission"
+& "$bt\apksigner.bat" verify --print-certs "$root\VideoPlayer-1.0.2-release.apk"
+& "$bt\aapt2.exe" dump badging "$root\VideoPlayer-1.0.2-release.apk" | Select-String "package:|sdkVersion|uses-permission"
 ```
 
 实测结果：
@@ -387,11 +438,17 @@ $bt = "$root\_tools\sdk\build-tools\34.0.0"
 Verifies
 Verified using v2 scheme (APK Signature Scheme v2): true
 Signer #1 certificate DN: CN=Video Player Demo, OU=Demo, O=Demo, L=Beijing, ST=Beijing, C=CN
-package: name='com.example.videoplayer' versionCode='1' versionName='1.0.0' compileSdkVersion='34'
+package: name='com.example.videoplayer' versionCode='3' versionName='1.0.2' compileSdkVersion='34'
 sdkVersion:'24'  targetSdkVersion:'34'
 uses-permission: name='android.permission.MODIFY_AUDIO_SETTINGS'
+uses-permission: name='android.permission.READ_MEDIA_VIDEO'
+uses-permission: name='android.permission.READ_MEDIA_VISUAL_USER_SELECTED'
+uses-permission: name='android.permission.READ_EXTERNAL_STORAGE' maxSdkVersion='32'
+uses-permission: name='android.permission.WAKE_LOCK'
+uses-permission: name='android.permission.RECEIVE_BOOT_COMPLETED'
 uses-permission: name='com.example.videoplayer.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'   ← androidx 自动生成，无需关注
-SHA-256: 5B09C0C0BFB98ACA49B4E057FE37136D5427D526B2625062723C5217799E01D7
+文件大小: 3,191,191 字节（约 3.04 MB）
+SHA-256: C9AF62B1137DE102BCBF2C3369E44FBB0B9981C248DA1E921A742857EF1EDEE4
 ```
 
 ---
@@ -401,10 +458,17 @@ SHA-256: 5B09C0C0BFB98ACA49B4E057FE37136D5427D526B2625062723C5217799E01D7
 | 权限 | 来源 | 是否必要 |
 | --- | --- | --- |
 | `MODIFY_AUDIO_SETTINGS` | 工程清单 | 需要。调系统媒体音量（normal 权限，安装即授予，无运行时弹窗） |
-| ~~`READ_MEDIA_VIDEO` / `READ_EXTERNAL_STORAGE`~~ | — | **不需要**：走 SAF，权限跟随 URI 授权 |
+| `READ_MEDIA_VIDEO` | 工程清单 | 需要（Android 13+）。相册页读视频列表；用户拒绝时降级到 SAF 入口 |
+| `READ_MEDIA_VISUAL_USER_SELECTED` | 工程清单 | 需要（Android 14+）。用户选「仅允许部分照片和视频」时只拿到它，列表只能看到被选中的视频 |
+| `READ_EXTERNAL_STORAGE`（`maxSdkVersion="32"`） | 工程清单 | 需要（Android 12 及以下） |
+| `WAKE_LOCK` / `RECEIVE_BOOT_COMPLETED` | WorkManager 库清单合并 | 需要。前者供 JobScheduler 持锁跑导入，后者用于重启后继续未完成的导入队列 |
+| `com.example.videoplayer.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` | androidx 自动生成 | 自用权限，无需关注 |
 | ~~`INTERNET`~~ | — | **不需要**：纯本地播放 |
-| ~~`ACCESS_NETWORK_STATE`~~ | media3 库清单合并 | **已用 `tools:node="remove"` 剔除**；将来加网络流播放再删掉那两行 |
-| ~~`FOREGROUND_SERVICE` / `WAKE_LOCK`~~ | — | **不需要**：没有后台播放 |
+| ~~`ACCESS_NETWORK_STATE`~~ | media3 库清单合并 | **已用 `tools:node="remove"` 剔除**；将来加网络流播放再删掉那行 |
+| ~~`FOREGROUND_SERVICE`~~ | WorkManager 库清单合并 | **已用 `tools:node="remove"` 剔除**：导入是普通后台任务，不用前台服务 |
+
+> 不申请 `MANAGE_EXTERNAL_STORAGE`（全盘文件权限会被应用商店拒审）；
+> 也不申请 `POST_NOTIFICATIONS`——导入进度只在应用内展示，不发通知。
 
 ---
 
@@ -419,6 +483,9 @@ SHA-256: 5B09C0C0BFB98ACA49B4E057FE37136D5427D526B2625062723C5217799E01D7
 7. **进度不记忆**：同一视频重新打开从头播放（需求只要求“一键续播”，未要求记住播放位置；要加的话在 `RecentVideo` 里存 `positionMs` 即可）。
 8. **texture_view 的代价**：为让 Compose 控件盖在画面上用了 TextureView，比 SurfaceView 多一次纹理拷贝，4K 高码率视频在极低端机上可能略掉帧；若把控件层改成 Dialog/PopupWindow 可换回 SurfaceView。
 9. **自签名证书**：`keystore/release.keystore` 是测试证书，密码写在 `keystore.properties` 里，**仅用于本地安装验证，不能上应用商店**；上架要换成自己的证书并妥善保管（丢了就无法覆盖升级）。
+10. **媒体库会占用双倍空间（v1.0.2）**：视频被复制进应用私有目录，同一部片子既有原文件又有一份副本。删除媒体库条目只删副本；卸载应用会连副本一起删掉（需要时重新导入）。可用空间不足时会拒绝导入并提示。
+11. **导入耗时与视频大小成正比（v1.0.2）**：复制 + 探测在 WorkManager 后台线程串行执行，一部 2GB 的电影在入门机上可能要几十秒。导入期间可以退出应用，任务会继续；但系统内存极度紧张时可能被推迟到下次充电/充电时执行。
+12. **媒体库视频不支持「移动到 SD 卡」**：私有目录固定在主存储；外置存储的 `getExternalFilesDirs` 未使用，换卡后需要重新导入。
 
 ---
 

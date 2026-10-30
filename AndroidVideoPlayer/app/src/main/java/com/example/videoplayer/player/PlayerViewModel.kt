@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.AudioAttributes
@@ -19,9 +20,12 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import com.example.videoplayer.data.Playability
+import com.example.videoplayer.data.PlayabilityChecker
 import com.example.videoplayer.data.RecentVideo
 import com.example.videoplayer.data.RecentVideoStore
 import com.example.videoplayer.data.VideoMetaReader
+import com.example.videoplayer.data.db.VideoEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -35,6 +39,12 @@ import kotlinx.coroutines.withContext
 
 /** 音量三档：静音 / 低 / 高 */
 enum class VolumeLevel { MUTE, LOW, HIGH }
+
+/** 本次播放的来源页面，「返回」按钮据此决定回到哪里。 */
+enum class VideoSource { SAF, GALLERY, RECENT, LIBRARY }
+
+/** 播放前的预检拦截结论，等用户决定是否仍然强播。 */
+data class PreflightBlock(val reason: String, val detail: String)
 
 data class PlayerUiState(
     val videoName: String = "",
@@ -51,7 +61,13 @@ data class PlayerUiState(
     val volumeLevel: VolumeLevel = VolumeLevel.HIGH,
     val volumePercent: Int = 100,
     val errorMessage: String? = null,
-    val errorDetail: String? = null
+    val errorDetail: String? = null,
+    /** 正在做可播放性预检；UI 侧延迟 200ms 才展示 loading，避免一闪而过。 */
+    val isChecking: Boolean = false,
+    /** 预检判定不可播，等用户确认是否仍然强播。 */
+    val preflightBlock: PreflightBlock? = null,
+    /** 本次播放的来源页面。 */
+    val source: VideoSource = VideoSource.SAF
 )
 
 /**
@@ -149,8 +165,20 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
     // 打开视频
     // ------------------------------------------------------------------
 
-    /** 打开一个已经持久化授权的 content:// Uri。 */
-    fun openVideo(uri: Uri) {
+    /**
+     * 打开一个视频。
+     *
+     * 默认会先做一次可播放性预检（MediaExtractor 读轨道 + MediaCodecList 找解码器），
+     * 不可播时不进播放器，而是抛给 UI 让用户决定「仍要尝试播放」。
+     *
+     * @param source 来源页面，「返回」按钮据此决定回到哪里
+     * @param skipPreflight true 时跳过预检直接播（用户选「仍要尝试播放」或「重试」）
+     */
+    fun openVideo(
+        uri: Uri,
+        source: VideoSource = VideoSource.SAF,
+        skipPreflight: Boolean = false
+    ) {
         // 快速连点两个视频时只让最后一次请求生效，避免「点了 B 却在播 A」
         val requestId = ++openRequestId
         // 先把占位状态同步推给 UI：播放页立即进入 loading，而不是闪一下空白
@@ -159,26 +187,85 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
                 videoName = "",
                 videoUri = uri.toString(),
                 hasVideo = true,
-                isBuffering = true,
+                isBuffering = false,
+                isChecking = !skipPreflight,
                 isPlaying = false,
                 isReady = false,
                 ended = false,
                 errorMessage = null,
                 errorDetail = null,
+                preflightBlock = null,
                 durationMs = 0L,
                 positionMs = 0L,
-                bufferedMs = 0L
+                bufferedMs = 0L,
+                source = source
             )
         }
         viewModelScope.launch {
             val meta = withContext(Dispatchers.IO) { VideoMetaReader.read(app, uri) }
             // 期间又打开了别的视频，或者播放器已释放：本次结果直接丢弃
             if (released || requestId != openRequestId) return@launch
-            prepareVideo(uri, meta)
+
+            if (skipPreflight) {
+                prepareVideo(uri, meta, silentAudio = false)
+                return@launch
+            }
+
+            // 第二级校验：MediaExtractor + MediaCodecList，全程在 IO 线程
+            val verdict = PlayabilityChecker.deepCheck(
+                context = app,
+                uri = uri,
+                cacheKey = "${uri}|${meta.sizeBytes}"
+            )
+            if (released || requestId != openRequestId) return@launch
+
+            when (verdict) {
+                is Playability.Unsupported -> _uiState.update {
+                    it.copy(
+                        isChecking = false,
+                        isBuffering = false,
+                        preflightBlock = PreflightBlock(verdict.reason, verdict.detail)
+                    )
+                }
+
+                is Playability.SilentOnly -> prepareVideo(uri, meta, silentAudio = true)
+                is Playability.Supported -> prepareVideo(uri, meta, silentAudio = false)
+            }
         }
     }
 
-    private fun prepareVideo(uri: Uri, meta: VideoMetaReader.Meta) {
+    /**
+     * 播放媒体库里已经入库的本地文件。
+     *
+     * 本地文件在导入时已经做过解码能力探测并写进数据库，这里不再重复预检；
+     * 播放源永远是私有目录下的 File，不依赖 content:// 授权是否还有效。
+     */
+    fun openLibraryVideo(video: VideoEntity) {
+        if (released) return
+        val file = java.io.File(video.localPath)
+        if (!file.exists()) {
+            _uiState.update {
+                it.copy(
+                    errorMessage = "本地文件已丢失",
+                    errorDetail = video.localPath
+                )
+            }
+            return
+        }
+        _uiState.update { it.copy(source = VideoSource.LIBRARY) }
+        val meta = VideoMetaReader.Meta(
+            displayName = video.fileName,
+            sizeBytes = video.size,
+            durationMs = video.durationMs
+        )
+        prepareVideo(Uri.fromFile(file), meta, silentAudio = false)
+    }
+
+    private fun prepareVideo(
+        uri: Uri,
+        meta: VideoMetaReader.Meta,
+        silentAudio: Boolean
+    ) {
         if (released) return
         val item = MediaItem.Builder()
             .setUri(uri)
@@ -190,6 +277,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
                 videoName = meta.displayName,
                 videoUri = uri.toString(),
                 hasVideo = true,
+                isChecking = false,
+                preflightBlock = null,
                 isBuffering = true,
                 isPlaying = false,
                 isReady = false,
@@ -202,27 +291,53 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
             )
         }
 
+        // 视频轨能解码、音频轨不能：把播放器音量乘数拉到 0 做「只放画面」。
+        // player.volume 是独立于系统音量的乘数，用户再按音量键也不会出声。
+        player.volume = if (silentAudio) 0f else 1f
+        if (silentAudio) {
+            runCatching {
+                Toast.makeText(app, "音频格式不支持，将静音播放", Toast.LENGTH_LONG).show()
+            }
+        }
+
         player.setMediaItem(item)
         player.prepare()
         player.playWhenReady = true
         requestAudioFocus()
         startProgressTicker()
 
-        val record = RecentVideo(
-            uri = uri.toString(),
-            displayName = meta.displayName,
-            sizeBytes = meta.sizeBytes,
-            durationMs = meta.durationMs,
-            lastPlayedAt = System.currentTimeMillis()
-        )
-        _recentVideos.value = store.upsert(record)
+        // 媒体库的视频由 Room 记录播放历史，不再写旧的最近播放入口
+        if (_uiState.value.source != VideoSource.LIBRARY) {
+            val record = RecentVideo(
+                uri = uri.toString(),
+                displayName = meta.displayName,
+                sizeBytes = meta.sizeBytes,
+                durationMs = meta.durationMs,
+                lastPlayedAt = System.currentTimeMillis()
+            )
+            _recentVideos.value = store.upsert(record)
+        }
     }
 
-    /** 播放失败后重试当前视频。 */
+    /** 播放失败后重试当前视频：用户已经知道它可能有问题，跳过预检直接重试。 */
     fun retry() {
         val uriString = _uiState.value.videoUri
         if (uriString.isBlank()) return
-        openVideo(Uri.parse(uriString))
+        openVideo(Uri.parse(uriString), _uiState.value.source, skipPreflight = true)
+    }
+
+    /** 预检拦截后用户选择「仍要尝试播放」。 */
+    fun playAnyway() {
+        val uriString = _uiState.value.videoUri
+        if (uriString.isBlank()) return
+        openVideo(Uri.parse(uriString), _uiState.value.source, skipPreflight = true)
+    }
+
+    /** 预检拦截后用户点了「取消」：丢掉这个待播放的视频。 */
+    fun dismissPreflightBlock() {
+        _uiState.update {
+            it.copy(preflightBlock = null, isChecking = false, isBuffering = false)
+        }
     }
 
     fun dismissError() {
@@ -474,6 +589,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
             it.copy(
                 errorMessage = PlaybackErrorMapper.toUserMessage(error),
                 errorDetail = PlaybackErrorMapper.technicalDetail(error),
+                isChecking = false,
                 isBuffering = false,
                 isPlaying = false
             )

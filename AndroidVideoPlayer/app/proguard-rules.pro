@@ -15,6 +15,13 @@
 -keepattributes Signature
 -keepattributes InnerClasses
 
+# ---- Coil（相册缩略图 / 视频首帧）----
+-keep class coil.** { *; }
+-dontwarn coil.**
+# VideoFrameDecoder 走 MediaMetadataRetriever，反射相关的解码器实现不能被裁
+-keep class coil.decode.** { *; }
+-keep class coil.map.** { *; }
+
 # ---- Kotlin ----
 -keepclassmembers class **$WhenMappings { <fields>; }
 -dontwarn kotlin.**

@@ -6,6 +6,24 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <!--
+        相册访问权限按系统版本分三档，不要一刀切：
+
+        - Android 13（API 33）起：READ_MEDIA_VIDEO
+        - Android 14（API 34）起：额外声明 READ_MEDIA_VISUAL_USER_SELECTED。
+          用户选「仅允许部分照片和视频」时只拿到这一个权限，
+          列表里只能看到被选中的那些视频，需要在列表顶部给一个「管理可访问的相册」入口。
+        - Android 12 及以下：READ_EXTERNAL_STORAGE，用 maxSdkVersion="32" 收口，
+          避免在 13+ 上露出一堆过时权限。
+
+        不使用 MANAGE_EXTERNAL_STORAGE：那是全盘文件权限，会被应用商店拒审。
+    -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <!--
         media3-exoplayer 的库清单会合并进 ACCESS_NETWORK_STATE。
         本 App 只播放本地 content:// 文件，完全不需要网络状态，这里显式剔除，
         保证最终 APK 权限最小（INTERNET 本来就没有）。
@@ -13,6 +31,16 @@
     -->
     <uses-permission
         android:name="android.permission.ACCESS_NETWORK_STATE"
+        tools:node="remove" />
+
+    <!--
+        WorkManager 的库清单会合并进 FOREGROUND_SERVICE / RECEIVE_BOOT_COMPLETED / WAKE_LOCK。
+        导入是普通后台任务、不用前台服务，把 FOREGROUND_SERVICE 剔除；
+        RECEIVE_BOOT_COMPLETED 与 WAKE_LOCK 保留：前者用于重启后继续未完成的导入队列，
+        后者是 JobScheduler 调度所需。
+    -->
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE"
         tools:node="remove" />
 
     <application
