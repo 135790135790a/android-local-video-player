@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
 }
 
 val keystorePropsFile = rootProject.file("keystore.properties")
@@ -21,8 +22,8 @@ android {
         applicationId = "com.example.videoplayer"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 3
+        versionName = "1.0.2"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -79,6 +80,11 @@ android {
     }
 }
 
+ksp {
+    // 导出 Room schema，方便后续版本做 migration 检查
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -94,6 +100,16 @@ dependencies {
 
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.ui)
+
+    // 相册缩略图：coil-video 提供 VideoFrameDecoder，从视频里抽一帧当封面
+    implementation(libs.coil.compose)
+    implementation(libs.coil.video)
+
+    // 媒体入库：Room 存元数据，WorkManager 做可中断的后台导入
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
+    implementation(libs.androidx.work.runtime.ktx)
 
     debugImplementation(libs.androidx.ui.tooling)
 }
