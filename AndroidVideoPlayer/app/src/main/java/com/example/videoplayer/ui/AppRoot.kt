@@ -114,8 +114,8 @@ fun AppRoot(
                     HomeTab.LIBRARY -> LibraryScreen(
                         viewModel = libraryViewModel,
                         compact = compact,
-                        onOpenVideo = { video ->
-                            playerViewModel.openLibraryVideo(video)
+                        onOpenVideo = { video, queue ->
+                            playerViewModel.openLibraryVideo(video, queue)
                             showPlayer = true
                         },
                         onPickFromGallery = { tab = HomeTab.GALLERY },

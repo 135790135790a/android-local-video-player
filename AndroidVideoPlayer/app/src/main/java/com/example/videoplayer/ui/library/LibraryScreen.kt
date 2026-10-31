@@ -1,5 +1,6 @@
 package com.example.videoplayer.ui.library
 
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,7 +22,10 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
@@ -35,6 +39,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -45,6 +50,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,9 +65,11 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.request.videoFrameMillis
 import com.example.videoplayer.util.AppImageLoader
+import com.example.videoplayer.util.DiagnosticsExporter
 import com.example.videoplayer.data.db.VideoEntity
 import com.example.videoplayer.util.Formatters
 import java.io.File
+import kotlinx.coroutines.launch
 
 /**
  * 媒体库主页面：已入库视频的唯一播放入口。
@@ -73,12 +81,14 @@ import java.io.File
 fun LibraryScreen(
     viewModel: LibraryViewModel,
     compact: Boolean,
-    onOpenVideo: (VideoEntity) -> Unit,
+    onOpenVideo: (VideoEntity, List<VideoEntity>) -> Unit,
     onPickFromGallery: () -> Unit,
     onPickFromSaf: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val videos by viewModel.videos.collectAsState()
+    val query by viewModel.query.collectAsState()
+    val sort by viewModel.sort.collectAsState()
     val usage by viewModel.usage.collectAsState()
     val importState by viewModel.importState.collectAsState()
     val message by viewModel.message.collectAsState()
@@ -86,6 +96,9 @@ fun LibraryScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var infoVideo by remember { mutableStateOf<VideoEntity?>(null) }
     var importMenuOpen by remember { mutableStateOf(false) }
+    var sortMenuOpen by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(message) {
         val text = message ?: return@LaunchedEffect
@@ -109,6 +122,30 @@ fun LibraryScreen(
                     color = MaterialTheme.colorScheme.onBackground
                 )
                 Spacer(Modifier.weight(1f))
+                Box {
+                    IconButton(onClick = { sortMenuOpen = true }) {
+                        Icon(Icons.Filled.List, contentDescription = "排序方式：${sort.label}")
+                    }
+                    DropdownMenu(
+                        expanded = sortMenuOpen,
+                        onDismissRequest = { sortMenuOpen = false }
+                    ) {
+                        LibrarySort.entries.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option.label) },
+                                onClick = {
+                                    viewModel.setSort(option)
+                                    sortMenuOpen = false
+                                },
+                                trailingIcon = if (option == sort) {
+                                    { Icon(Icons.Filled.Info, contentDescription = "当前排序") }
+                                } else {
+                                    null
+                                }
+                            )
+                        }
+                    }
+                }
                 IconButton(onClick = viewModel::refresh) {
                     Icon(Icons.Filled.Refresh, contentDescription = "刷新媒体库")
                 }
@@ -128,9 +165,46 @@ fun LibraryScreen(
                             text = { Text("从文件选择导入") },
                             onClick = { importMenuOpen = false; onPickFromSaf() }
                         )
+                        DropdownMenuItem(
+                            text = { Text("导出诊断包") },
+                            onClick = {
+                                importMenuOpen = false
+                                scope.launch {
+                                    val file = viewModel.exportDiagnostics() ?: return@launch
+                                    DiagnosticsExporter.shareIntent(context, file)?.let { share ->
+                                        runCatching {
+                                            context.startActivity(
+                                                Intent.createChooser(share, "发送诊断包")
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        )
                     }
                 }
             }
+
+            OutlinedTextField(
+                value = query,
+                onValueChange = viewModel::setQuery,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                placeholder = { Text("搜索文件名、编码、分辨率") },
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                trailingIcon = if (query.isNotEmpty()) {
+                    {
+                        IconButton(onClick = { viewModel.setQuery("") }) {
+                            Icon(Icons.Filled.Clear, contentDescription = "清除搜索")
+                        }
+                    }
+                } else {
+                    null
+                },
+                singleLine = true,
+                shape = MaterialTheme.shapes.medium
+            )
 
             UsageCard(
                 usage = usage,
@@ -167,7 +241,7 @@ fun LibraryScreen(
                             onPlay = {
                                 if (video.isPlayable) {
                                     viewModel.markPlayed(video)
-                                    onOpenVideo(video)
+                                    onOpenVideo(video, videos)
                                 } else {
                                     infoVideo = video
                                 }
@@ -194,7 +268,7 @@ fun LibraryScreen(
             onPlay = {
                 if (video.isPlayable) {
                     viewModel.markPlayed(video)
-                    onOpenVideo(video)
+                    onOpenVideo(video, videos)
                 }
             },
             onDelete = { viewModel.deleteVideo(video) }
@@ -464,6 +538,29 @@ private fun VideoTile(
                     tint = Color.White,
                     modifier = Modifier.size(17.dp)
                 )
+            }
+
+            // 已看进度：只对看过一部分的视频显示一条细线
+            val watched = if (video.durationMs > 0L && video.lastPositionMs > 0L) {
+                (video.lastPositionMs.toFloat() / video.durationMs).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+            if (watched > 0.01f) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .background(Color.Black.copy(alpha = 0.45f))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(watched)
+                            .height(3.dp)
+                            .background(MaterialTheme.colorScheme.primary)
+                    )
+                }
             }
 
             if (!video.isPlayable) {

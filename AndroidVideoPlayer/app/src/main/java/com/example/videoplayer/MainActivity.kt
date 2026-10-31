@@ -1,14 +1,19 @@
 package com.example.videoplayer
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.videoplayer.data.LegacyMigrator
 import com.example.videoplayer.player.PlayerViewModel
@@ -21,6 +26,13 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
 
     private val viewModel: PlayerViewModel by viewModels()
+
+    /**
+     * Android 13 起通知是运行时权限。
+     * 不授予也能后台播放，只是媒体通知不显示，所以这里拒绝后不做任何打扰。
+     */
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,6 +47,8 @@ class MainActivity : ComponentActivity() {
             runCatching { LegacyMigrator.migrateIfNeeded(applicationContext) }
         }
 
+        requestNotificationPermission()
+
         enableEdgeToEdge()
         setContent {
             VideoPlayerTheme {
@@ -42,6 +56,17 @@ class MainActivity : ComponentActivity() {
                     AppRoot(playerViewModel = viewModel)
                 }
             }
+        }
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
@@ -53,7 +78,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        // 退到后台先暂停，避免用户看不到画面却还在出声
+        // 后台播放：onHostStop 现在只记录进度，不再暂停播放
         viewModel.onHostStop()
     }
 

@@ -11,6 +11,7 @@ import com.example.videoplayer.data.VideoProbe
 import com.example.videoplayer.data.db.AppDatabase
 import com.example.videoplayer.data.db.VideoEntity
 import java.io.File
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * 视频入库任务：复制 → 指纹判重 → 探测元数据 → 写 Room。
@@ -77,7 +78,8 @@ class ImportWorker(
                 }
             }
 
-            val info = VideoProbe.probeFile(copied)
+            // 探测卡死的坏文件会让整个导入队列停住，这里给 20 秒上限，超时就按「探测不到」入库
+            val info = withTimeoutOrNull(PROBE_TIMEOUT_MS) { VideoProbe.probeFile(copied) }
             val inserted = dao.insert(
                 VideoEntity(
                     fileName = meta.displayName,
@@ -139,5 +141,8 @@ class ImportWorker(
         const val RESULT_DONE = "result_done"
         const val RESULT_FAILED = "result_failed"
         const val RESULT_SKIPPED = "result_skipped"
+
+        /** 单个文件的元数据探测上限，防止坏文件把导入队列卡住 */
+        private const val PROBE_TIMEOUT_MS = 20_000L
     }
 }

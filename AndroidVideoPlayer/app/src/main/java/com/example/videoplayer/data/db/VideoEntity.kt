@@ -34,6 +34,11 @@ data class VideoEntity(
     val importedAt: Long,
     val lastPlayedAt: Long = 0L,
     val playCount: Int = 0,
+    /**
+     * 上次播放到的位置（毫秒），用于续播。
+     * 0 表示从头播；播到离结尾不足 3 秒时会被归零，避免「一打开就播完」。
+     */
+    val lastPositionMs: Long = 0L,
     /** 前 1MB 的 MD5，用来识别同内容不同名的重复文件 */
     val checksum: String = "",
     /** 源文件的修改时间，参与去重键 */

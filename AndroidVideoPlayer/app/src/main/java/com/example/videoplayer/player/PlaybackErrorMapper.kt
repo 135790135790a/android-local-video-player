@@ -7,7 +7,13 @@ import androidx.media3.common.PlaybackException
  */
 object PlaybackErrorMapper {
 
-    fun toUserMessage(error: PlaybackException): String = when (error.errorCode) {
+    fun toUserMessage(error: PlaybackException): String = messageForCode(error.errorCode)
+
+    /**
+     * 纯函数版本：只依赖错误码，方便在 JVM 单元测试里直接验证整张映射表。
+     * 媒体3 的 ERROR_CODE_* 都是编译期常量，JVM 测试里不会触发 Android stub。
+     */
+    fun messageForCode(errorCode: Int): String = when (errorCode) {
         // ---- 解码相关：编码格式不被设备支持 ----
         PlaybackException.ERROR_CODE_DECODING_FAILED,
         PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
@@ -58,7 +64,7 @@ object PlaybackErrorMapper {
             "播放器内部错误，请重试"
 
         else ->
-            "播放失败（错误码 ${error.errorCode}），请重试或更换视频"
+            "播放失败（错误码 $errorCode），请重试或更换视频"
     }
 
     /** 开发者排查用的附加信息，UI 上折叠显示。 */

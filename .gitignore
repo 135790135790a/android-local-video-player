@@ -37,3 +37,4 @@ _*.py
 _*.log
 _sdk_install.log
 _sdk_build.log
+*.docx

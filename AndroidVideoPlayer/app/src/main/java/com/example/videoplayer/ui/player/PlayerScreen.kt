@@ -3,10 +3,15 @@ package com.example.videoplayer.ui.player
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -65,6 +70,14 @@ private const val AUTO_HIDE_DELAY_MS = 3_000L
 /** 预检通常几十毫秒就结束，低于这个时长的 loading 会一闪而过，反而干扰视线。 */
 private const val CHECKING_INDICATOR_DELAY_MS = 200L
 
+/** 从 content:// 取文件名，取不到就退回路径末段，保证按钮/状态里总有东西可显示。 */
+private fun querySubtitleName(context: Context, uri: Uri): String =
+    runCatching {
+        context.contentResolver
+            .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+    }.getOrNull() ?: uri.lastPathSegment ?: "外挂字幕"
+
 /**
  * 播放页。
  *
@@ -101,6 +114,22 @@ fun PlayerScreen(
     fun poke() {
         controlsVisible = true
         interactionKey++
+    }
+
+    // ---- 外挂字幕：选文件 -> 持久化授权 -> 交给 ViewModel 挂到当前 MediaItem ----
+    val subtitlePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            viewModel.attachSubtitle(uri, querySubtitleName(context, uri))
+            poke()
+        }
     }
 
     // 沉浸式全屏 + 退出时恢复
@@ -252,6 +281,9 @@ fun PlayerScreen(
                     onPlayPause = viewModel::togglePlayPause,
                     onVolumeClick = viewModel::cycleVolume,
                     onSpeedSelected = viewModel::setSpeed,
+                    onSubtitleClick = { subtitlePicker.launch(arrayOf("*/*")) },
+                    onSubtitlePick = { subtitlePicker.launch(arrayOf("*/*")) },
+                    onSubtitleClear = viewModel::detachSubtitle,
                     onToggleFullscreen = {
                         activity?.requestedOrientation = if (isLandscape) {
                             ActivityInfo.SCREEN_ORIENTATION_PORTRAIT

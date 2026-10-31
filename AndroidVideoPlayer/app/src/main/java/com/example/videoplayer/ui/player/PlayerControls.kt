@@ -102,6 +102,9 @@ fun PlayerBottomBar(
     onPlayPause: () -> Unit,
     onVolumeClick: () -> Unit,
     onSpeedSelected: (Float) -> Unit,
+    onSubtitleClick: () -> Unit,
+    onSubtitlePick: () -> Unit,
+    onSubtitleClear: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onSeek: (Long) -> Unit,
     onInteract: () -> Unit,
@@ -146,6 +149,13 @@ fun PlayerBottomBar(
             )
 
             Spacer(modifier = Modifier.weight(1f))
+
+            SubtitleButton(
+                active = state.subtitleName != null,
+                onClick = { onSubtitleClick(); onInteract() },
+                onPick = { onSubtitlePick(); onInteract() },
+                onClear = { onSubtitleClear(); onInteract() }
+            )
 
             SpeedButton(
                 speed = state.speed,
@@ -262,6 +272,47 @@ private fun VolumeButton(level: VolumeLevel, onClick: () -> Unit) {
             contentDescription = label,
             tint = Color.White
         )
+    }
+}
+
+/**
+ * 字幕按钮。
+ *
+ * 没有字幕时点一下直接开文件选择器；已有字幕时点一下弹菜单（更换 / 关闭）。
+ * 激活态用主题色描出图标，非激活态是白色，一眼能看出当前有没有挂字幕。
+ */
+@Composable
+private fun SubtitleButton(
+    active: Boolean,
+    onClick: () -> Unit,
+    onPick: () -> Unit,
+    onClear: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { if (active) expanded = true else onClick() }) {
+            Icon(
+                painter = painterResource(R.drawable.ic_subtitles),
+                contentDescription = if (active) "字幕已开启，点击更换或关闭" else "选择外挂字幕文件",
+                tint = if (active) MaterialTheme.colorScheme.primary else Color.White
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("更换字幕") },
+                onClick = {
+                    expanded = false
+                    onPick()
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("关闭字幕") },
+                onClick = {
+                    expanded = false
+                    onClear()
+                }
+            )
+        }
     }
 }
 

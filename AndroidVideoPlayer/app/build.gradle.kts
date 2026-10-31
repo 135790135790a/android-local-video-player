@@ -22,8 +22,8 @@ android {
         applicationId = "com.example.videoplayer"
         minSdk = 24
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.0.2"
+        versionCode = 7
+        versionName = "1.0.6"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -101,6 +101,9 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.ui)
 
+    // 后台播放：MediaSessionService 承载媒体通知 / 锁屏 / 耳机按键
+    implementation(libs.androidx.media3.session)
+
     // 相册缩略图：coil-video 提供 VideoFrameDecoder，从视频里抽一帧当封面
     implementation(libs.coil.compose)
     implementation(libs.coil.video)
@@ -112,4 +115,7 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
 
     debugImplementation(libs.androidx.ui.tooling)
+
+    // 纯逻辑单元测试（只在 testImplementation，不会打进 APK）
+    testImplementation(libs.junit)
 }

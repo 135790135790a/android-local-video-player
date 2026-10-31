@@ -34,6 +34,10 @@ interface VideoDao {
     @Query("UPDATE videos SET lastPlayedAt = :timestamp, playCount = playCount + 1 WHERE id = :id")
     suspend fun markPlayed(id: Long, timestamp: Long)
 
+    /** 续播用：记下当前播放位置（毫秒），播到结尾时传 0 */
+    @Query("UPDATE videos SET lastPositionMs = :positionMs WHERE id = :id")
+    suspend fun updatePosition(id: Long, positionMs: Long)
+
     @Query("UPDATE videos SET status = :status WHERE id = :id")
     suspend fun updateStatus(id: Long, status: String)
 

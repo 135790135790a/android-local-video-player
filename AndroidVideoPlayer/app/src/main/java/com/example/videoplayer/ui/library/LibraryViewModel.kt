@@ -11,17 +11,28 @@ import androidx.work.workDataOf
 import com.example.videoplayer.data.MediaLibrary
 import com.example.videoplayer.data.db.AppDatabase
 import com.example.videoplayer.data.db.VideoEntity
+import com.example.videoplayer.util.DiagnosticsExporter
 import com.example.videoplayer.work.ImportWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
+
+/** 媒体库排序方式 */
+enum class LibrarySort(val label: String) {
+    IMPORTED_DESC("导入时间"),
+    NAME_ASC("名称"),
+    SIZE_DESC("文件大小"),
+    DURATION_DESC("时长"),
+    LAST_PLAYED_DESC("最近播放")
+}
 
 data class LibraryUsage(
     val count: Int = 0,
@@ -55,8 +66,42 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     private val dao = AppDatabase.get(context).videoDao()
     private val workManager = WorkManager.getInstance(context)
 
-    val videos: StateFlow<List<VideoEntity>> = dao.observeAll()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    private val _query = MutableStateFlow("")
+    val query: StateFlow<String> = _query.asStateFlow()
+
+    private val _sort = MutableStateFlow(LibrarySort.IMPORTED_DESC)
+    val sort: StateFlow<LibrarySort> = _sort.asStateFlow()
+
+    /** 搜索 + 排序都在内存里做：视频量级是几百，够用且不必每改一个字就查一次库 */
+    val videos: StateFlow<List<VideoEntity>> =
+        combine(dao.observeAll(), _query, _sort) { list, keyword, sort ->
+            val filtered = if (keyword.isBlank()) {
+                list
+            } else {
+                val q = keyword.trim()
+                list.filter {
+                    it.fileName.contains(q, ignoreCase = true) ||
+                        it.videoCodec.contains(q, ignoreCase = true) ||
+                        it.audioCodec.contains(q, ignoreCase = true) ||
+                        it.resolutionLabel.contains(q, ignoreCase = true)
+                }
+            }
+            when (sort) {
+                LibrarySort.IMPORTED_DESC -> filtered
+                LibrarySort.NAME_ASC -> filtered.sortedBy { it.fileName.lowercase() }
+                LibrarySort.SIZE_DESC -> filtered.sortedByDescending { it.size }
+                LibrarySort.DURATION_DESC -> filtered.sortedByDescending { it.durationMs }
+                LibrarySort.LAST_PLAYED_DESC -> filtered.sortedByDescending { it.lastPlayedAt }
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun setQuery(text: String) {
+        _query.value = text
+    }
+
+    fun setSort(sort: LibrarySort) {
+        _sort.value = sort
+    }
 
     private val _usage = MutableStateFlow(LibraryUsage())
     val usage: StateFlow<LibraryUsage> = _usage.asStateFlow()
@@ -134,6 +179,9 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     fun consumeMessage() {
         _message.value = null
     }
+
+    /** 生成诊断包（设备信息 + 媒体库概览 + 崩溃日志），供用户反馈问题时附上。 */
+    suspend fun exportDiagnostics(): File? = DiagnosticsExporter.export(getApplication())
 
     fun refresh() {
         viewModelScope.launch {

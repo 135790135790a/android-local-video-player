@@ -11,6 +11,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import com.example.videoplayer.R
 
@@ -22,7 +23,11 @@ import com.example.videoplayer.R
 @OptIn(UnstableApi::class)
 @Composable
 fun VideoSurface(
-    player: Player,
+    /**
+     * v1.0.5 起播放器归 PlaybackService 所有，UI 侧通过 MediaController 异步连接，
+     * 连接完成前这里可能是 null（PlayerView 允许 setPlayer(null)，画面显示黑底即可）。
+     */
+    player: Player?,
     modifier: Modifier = Modifier
 ) {
     AndroidView(
@@ -32,6 +37,7 @@ fun VideoSurface(
                 useController = false
                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 setBackgroundColor(Color.BLACK)
+                configureSubtitleView()
                 this.player = player
             }
         },
@@ -44,4 +50,28 @@ fun VideoSurface(
             view.player = null
         }
     )
+}
+
+/**
+ * 外挂字幕的显示样式。
+ *
+ * PlayerView 自带一个 SubtitleView，ExoPlayer 解析出的 cue 会直接送到这里渲染，
+ * 不需要我们自己画字幕。这里只做三件事：白字 + 半透明黑底 + 描边保证任意画面下可读；
+ * 底部留 12% 空白，避免字幕被 Compose 绘制的进度条压住。
+ */
+@OptIn(UnstableApi::class)
+private fun PlayerView.configureSubtitleView() {
+    val subtitle = subtitleView ?: return
+    subtitle.setStyle(
+        CaptionStyleCompat(
+            Color.WHITE,
+            android.graphics.Color.argb(0xB3, 0x00, 0x00, 0x00),
+            Color.TRANSPARENT,
+            CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+            Color.BLACK,
+            null
+        )
+    )
+    subtitle.setFractionalTextSize(0.053f)
+    subtitle.setBottomPaddingFraction(0.12f)
 }

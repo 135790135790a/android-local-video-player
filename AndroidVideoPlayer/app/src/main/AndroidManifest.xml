@@ -34,14 +34,15 @@
         tools:node="remove" />
 
     <!--
-        WorkManager 的库清单会合并进 FOREGROUND_SERVICE / RECEIVE_BOOT_COMPLETED / WAKE_LOCK。
-        导入是普通后台任务、不用前台服务，把 FOREGROUND_SERVICE 剔除；
-        RECEIVE_BOOT_COMPLETED 与 WAKE_LOCK 保留：前者用于重启后继续未完成的导入队列，
-        后者是 JobScheduler 调度所需。
+        后台播放需要前台服务：MediaSessionService 在播放时以 mediaPlayback 类型进入前台，
+        系统据此保证进程不被轻易回收，同时挂出媒体通知。
+        - FOREGROUND_SERVICE：启动前台服务的前提（API 28+）
+        - FOREGROUND_SERVICE_MEDIA_PLAYBACK：API 34 起必须声明具体前台服务类型
+        - POST_NOTIFICATIONS：API 33 起通知是运行时权限，不授予时服务照常运行，只是通知不显示
     -->
-    <uses-permission
-        android:name="android.permission.FOREGROUND_SERVICE"
-        tools:node="remove" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
@@ -63,6 +64,29 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+            后台播放 + 媒体通知 + 锁屏/耳机按键。
+            exported=true 是 MediaSessionService 的要求：系统媒体控件需要通过该 action 找到会话。
+        -->
+        <service
+            android:name=".player.PlaybackService"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
 
 </manifest>

@@ -8,14 +8,14 @@
 | 项目 | 值 |
 | --- | --- |
 | 包名 / applicationId | `com.example.videoplayer` |
-| versionCode / versionName | `3` / `1.0.2` |
+| versionCode / versionName | `7` / `1.0.6` |
 | minSdk / targetSdk / compileSdk | `24` / `34` / `34` |
 | 语言 / UI | Kotlin + Jetpack Compose + Material 3 |
 | 架构 | MVVM（`AndroidViewModel` + `StateFlow`）+ Room + WorkManager |
 | 播放内核 | `androidx.media3:media3-exoplayer` + `media3-ui` 1.4.1 |
 | 数据层 | Room 2.6.1（KSP）、WorkManager 2.9.1、Coil 2.7.0（coil-compose + coil-video） |
 | Gradle | AGP 8.5.2 / Gradle 8.7 / Kotlin 2.0.21 / JVM 17 |
-| release APK | `VideoPlayer-1.0.2-release.apk`，约 3.0 MB，APK Signature Scheme v2 |
+| release APK | `VideoPlayer-1.0.6-release.apk`，约 3.7 MB，APK Signature Scheme v2 |
 
 ---
 
@@ -31,12 +31,18 @@
 | **视频信息面板（v1.0.2）** | `ui/library/VideoInfoSheet.kt` | 分辨率/帧率/码率/编码/容器/时长/大小/导入时间/路径，可一键删除 |
 | **后台导入进度（v1.0.2）** | `ui/library/LibraryViewModel.kt` | `workManager.getWorkInfoByIdFlow` 驱动进度卡片，支持取消 |
 | **重复导入去重（v1.0.2）** | `work/ImportWorker.kt` | 文件名+大小+mtime 一重，前 1MB MD5 二重 |
+| **播放进度记忆（v1.0.3）** | `data/db/VideoDao.updatePosition` + `PlayerViewModel.persistPosition` | 播放中每 5 秒、切后台、退出各落库一次；离结尾不足 3 秒归零 |
+| **连播（v1.0.5）** | `ui/library/LibraryScreen` 传队列 → `PlayerViewModel.playlist` | 从媒体库点开时携带当前筛选/排序后的队列，播完自动下一条；队尾或下一条文件丢失则停在当前页 |
+| **媒体库搜索 + 排序（v1.0.5）** | `ui/library/LibraryViewModel.kt`（`setQuery` / `setSort`） | 标题/路径/编码关键词 250ms 防抖过滤；最近导入/名称/大小/时长四维排序，选择存 SharedPreferences |
+| **后台播放（v1.0.5）** | `player/PlaybackService.kt` + `MediaController` | 播放器归 Service 所有，UI 通过 `MediaController` 连接；通知栏/锁屏/耳机键与界面操作同一个播放器 |
+| **外挂字幕（v1.0.6）** | `PlayerViewModel.attachSubtitle` + `VideoSurface` 字幕样式 | 支持 `.srt` / `.vtt` / `.ass` / `.ssa`，走 ExoPlayer 自带解析器；从当前位置重载不跳回开头，关闭只禁用文本轨不重载 |
 | 播放/暂停、点画面切换 | `PlayerViewModel.togglePlayPause()` / `PlayerScreen` | 单击＝控件可见时切换、控件隐藏时先唤出；双击＝直接切换 |
 | 暂停时中央大播放按钮 | `PlayerControls.CenterPlayButton` | 76dp `FilledIconButton`，仅在暂停且控件可见时显示 |
 | 进度条（拖动只改文字、松手才 seek） | `PlayerControls.ProgressRow` | 拖动期间只更新本地 `dragValue`，`onValueChangeFinished` 才 `onSeek` |
 | 缓冲进度 | `PlayerControls.ProgressRow` | Slider 下方 `Canvas` 画 2dp 缓冲线，宽度 = `bufferedFraction` |
 | 时间格式 mm:ss / hh:mm:ss | `util/TimeFormat.kt` | `Long.toPlaybackTime()` |
 | 崩溃兜底 | `util/CrashGuard.kt` | 堆栈落 `files/crash/`，下次启动提示；详见 `防闪退报告.md` |
+| **导出诊断包（v1.0.4）** | `util/DiagnosticsExporter.kt` + 媒体库右上角菜单 | 一键生成 zip（设备信息 + 媒体库清单 + 崩溃日志）并调起系统分享 |
 | 音量走 AudioManager STREAM_MUSIC | `PlayerViewModel.applyVolume()` | `audioManager.setStreamVolume(STREAM_MUSIC, level, 0)`，**没有使用 `player.volume`** |
 | 静音/低/高三档图标 | `PlayerControls.VolumeButton` | `ic_volume_off/down/up` 三个矢量图，点击在 静音→max/3→max 之间循环 |
 | 音量值持久化 | `PlayerViewModel.restoreSavedVolume()` | `player_prefs` 里的 `volume_percent`，启动时恢复；并用 `ContentObserver` 跟随系统音量键 |
@@ -64,8 +70,10 @@
 ```
 视频播放器/                                  ← 工作区根目录
 ├── README.md                               ← 本文档
-├── VideoPlayer-1.0.2-release.apk           ← 已构建好的签名安装包（约 3.0 MB）
-├── CHANGELOG.md                            ← 版本变更记录（v1.0.0 → v1.0.2）
+├── VideoPlayer-1.0.6-release.apk           ← 已构建好的签名安装包（约 3.7 MB）
+├── CHANGELOG.md                            ← 版本变更记录（v1.0.0 → v1.0.6）
+├── .github/workflows/android.yml           ← CI：单测 + assembleRelease + 产物上传
+├── scripts/test-local.ps1                  ← 本地跑单测的绕行脚本（中文路径 → %TEMP%）
 ├── AndroidVideoPlayer/                     ← Gradle 工程根
 │   ├── settings.gradle.kts                 仓库配置（阿里云/腾讯镜像）
 │   ├── build.gradle.kts                    顶层插件声明
@@ -104,8 +112,11 @@
 │           │   ├── work/
 │           │   │   └── ImportWorker.kt     ★ WorkManager 入库任务（复制/去重/探测/写库）
 │           │   ├── player/
+│           │   │   ├── AudioFocusController.kt v1.0.5 音频焦点集中管理
 │           │   │   ├── PlaybackErrorMapper.kt  PlaybackException → 中文提示
-│           │   │   └── PlayerViewModel.kt      ★ 播放器状态机（ExoPlayer 持有者）
+│           │   │   ├── PlaybackService.kt      v1.0.5 MediaSessionService，持有 ExoPlayer + MediaSession
+│           │   │   ├── PlayerViewModel.kt      ★ 播放器状态机（MediaController 连接服务）
+│           │   │   └── PositionPersister.kt    v1.0.5 播放位置独立落库
 │           │   ├── ui/
 │           │   │   ├── AppRoot.kt          首页（媒体库 / 相册 两个 Tab）+ 播放页切换
 │           │   │   ├── gallery/
@@ -126,7 +137,8 @@
 │           │       ├── ContextExt.kt       findActivity 扩展
 │           │       ├── Formatters.kt       体积/码率/帧率/日期格式化
 │           │       ├── TimeFormat.kt       播放进度格式化
-│           │       └── CrashGuard.kt       未捕获异常兜底（写崩溃日志）
+│           │       ├── CrashGuard.kt       未捕获异常兜底（写崩溃日志）
+│           │       └── DiagnosticsExporter.kt  v1.0.4 导出诊断包（设备信息+媒体库+崩溃日志）
 │           └── res/
 │               ├── layout/player_view.xml  PlayerView（texture_view，关内置控制条）
 │               ├── drawable/               ic_pause / ic_volume_{up,down,off} /
@@ -166,7 +178,7 @@
 | `build.gradle.kts`（根） | 三个插件 `alias(...) apply false`：android application、kotlin android、kotlin compose（Kotlin 2.0 起 Compose 编译器独立成插件） |
 | `gradle.properties` | `-Xmx2048m`、`parallel`、`caching`、`useAndroidX`、`nonTransitiveRClass`；另加 `org.gradle.vfs.watch=false`（沙箱环境文件监听会报 error 5）与 `android.overridePathCheck=true`（工程路径含中文） |
 | `gradle/libs.versions.toml` | 版本目录：agp 8.5.2、kotlin 2.0.21、composeBom 2024.09.03、media3 **1.4.1**（1.5+ 要求 compileSdk 35，不能升） |
-| `app/build.gradle.kts` | `versionCode 1` / `versionName "1.0.0"`；`signingConfigs.release` 从 `keystore.properties` 读四要素；release 开 `isMinifyEnabled + isShrinkResources` + `proguard-android-optimize.txt`；**没有 keystore.properties 时自动回退 debug 签名**，保证任何人 clone 都能 `assembleRelease`；`compileOptions`/`jvmTarget` 都 17 |
+| `app/build.gradle.kts` | `versionCode 7` / `versionName "1.0.6"`；`signingConfigs.release` 从 `keystore.properties` 读四要素；release 开 `isMinifyEnabled + isShrinkResources` + `proguard-android-optimize.txt`；**没有 keystore.properties 时自动回退 debug 签名**，保证任何人 clone 都能 `assembleRelease`；`compileOptions`/`jvmTarget` 都 17 |
 | `app/proguard-rules.pro` | keep `androidx.media3.exoplayer.**`、`common.**`、`extractor.**`、`decoder.**`、`datasource.**`，keep `Renderer` 实现类，`keepattributes Annotation/Signature/InnerClasses`，`-dontwarn androidx.media3.**`（可选依赖缺失告警） |
 | `keystore.properties` | `storeFile=keystore/release.keystore`、`storePassword`/`keyPassword=videoplayer123`、`keyAlias=videoplayer`。**正式发布务必换成自己的密码并排除出版本库** |
 | `keystore/release.keystore` | 测试用自签名证书：RSA 2048、SHA256withRSA、有效期 10000 天、`CN=Video Player Demo` |
@@ -175,7 +187,7 @@
 
 | 文件 | 作用 / 关键点 |
 | --- | --- |
-| `AndroidManifest.xml` | 只声明 `MODIFY_AUDIO_SETTINGS`（普通权限，无弹窗）；用 `tools:node="remove"` 显式剔除 media3 库清单合并进来的 `ACCESS_NETWORK_STATE`；**没有 INTERNET、没有 READ_MEDIA_VIDEO、没有 FOREGROUND_SERVICE**；MainActivity 配 `configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"`，让旋转不重建 Activity |
+| `AndroidManifest.xml` | v1.0.3 起声明 `MODIFY_AUDIO_SETTINGS`、相册三档权限、`FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_MEDIA_PLAYBACK` + `POST_NOTIFICATIONS`；用 `tools:node="remove"` 剔除 media3 库合并进来的 `ACCESS_NETWORK_STATE`；**没有 INTERNET**；`PlaybackService` 声明 `foregroundServiceType="mediaPlayback"`、`exported="true"` 并挂 `androidx.media3.session.MediaSessionService` 的 intent-filter；MainActivity 配 `configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"`，让旋转不重建 Activity |
 | `res/values/themes.xml` | `android:Theme.Material.NoActionBar`，`windowBackground #FF0D0D0F`，状态栏/导航栏透明（配合 Compose 边到边） |
 | `res/values/strings.xml` | `app_name = 本地视频播放器` |
 | `res/layout/player_view.xml` | `androidx.media3.ui.PlayerView`，`surface_type="texture_view"`（**必须 TextureView**：SurfaceView 在 Compose 里会盖住控件层）、`use_controller="false"`（控件全由 Compose 画）、`show_buffering="never"`、`resize_mode="fit"` |
@@ -204,12 +216,16 @@
 | `ui/player/PlayerControls.kt` | `PlayerTopBar`、`PlayerBottomBar`（进度条在上、按钮在下）、`ProgressRow`（Slider + Canvas 缓冲线）、`VolumeButton`（三档图标）、`SpeedButton`（窄屏只留图标）、`CenterPlayButton`、`PlayerErrorDialog` |
 | `ui/player/PlayerGestures.kt` | `GestureLayer`：水平拖动累计 ≥48dp 且横向为主 → 松手 `onSeekBy(±10s)`；垂直每 26dp 一格 → `onVolumeStep`；拖动中气泡提示，松手 800ms 消失 |
 | `ui/player/VideoSurface.kt` | `AndroidView` 里 inflate `player_view.xml`，`player` 在 factory/update 两处赋值，`onRelease` 置 null 防泄漏 |
-| `player/PlayerViewModel.kt` | 核心。`val player: ExoPlayer` 单实例；`PlayerUiState`；`VideoSource{SAF,GALLERY,RECENT,LIBRARY}`；`PreflightBlock`；`openLibraryVideo(video)` 直接用本地 `File` 播放并跳过预检；方法：`openVideo/retry/playAnyway/dismissPreflightBlock/togglePlayPause/seekTo/seekBy/setSpeed/cycleVolume/onHostStart/onHostStop/releasePlayer` |
+| `player/PlayerViewModel.kt` | 核心。v1.0.5 起不再持有 ExoPlayer，改为 `MediaController` 异步连接 `PlaybackService`（`val player: Player?`）；`PlayerUiState`；`VideoSource{SAF,GALLERY,RECENT,LIBRARY}`；`PreflightBlock`；`openLibraryVideo(video, queue)` 用本地 `File` 播放、跳过预检、带连播队列；方法：`openVideo/retry/playAnyway/dismissPreflightBlock/togglePlayPause/seekTo/seekBy/setSpeed/cycleVolume/onHostStart/onHostStop/releasePlayer` |
+| `player/AudioFocusController.kt`（v1.0.5） | 音频焦点集中管理：`AudioFocusRequest` + `AudioManager.OnAudioFocusChangeListener`，GAIN / LOSS / LOSS_TRANSIENT / LOSS_TRANSIENT_CAN_DUCK 四分支，短暂丢失后按需续播 |
+| `player/PositionPersister.kt`（v1.0.5） | 播放位置落库：`Dispatchers.IO` 专用 scope + `@Volatile boundId`，播放中每 5 秒 / 离开页面 / 播完归零；ViewModel 销毁不影响最后一次写入 |
+| `player/PlaybackService.kt`（v1.0.5） | `MediaSessionService`，**自己创建 ExoPlayer** 并配 `MediaSession`（`setSessionActivity` 指向启动页）；`onGetSession` 返回会话；`onTaskRemoved` 暂停 + `stopSelf`；`onDestroy` 释放 session 与 player |
 | `player/PlaybackErrorMapper.kt` | `toUserMessage(PlaybackException)` + `technicalDetail()`，把 `errorCode` 分组成：解码类、容器解析类、IO 类、音轨类、DRM 类、超时/远端 |
 | `data/RecentVideoStore.kt` · `RecentVideo.kt` | v1.0.2 起仅用于迁移：`SharedPreferences("recent_videos")` + `org.json`，`load()/upsert()/remove()/clear()` |
 | `data/VideoMetaReader.kt` | `ContentResolver.query` 三列；`runCatching` 包裹；文件名缺失回退 `uri.lastPathSegment`，大小缺失用 `openAssetFileDescriptor().length` |
 | `util/TimeFormat.kt` · `Formatters.kt` | `toPlaybackTime()` / `toReadableSize()`；`bytes/bitRate/frameRate/dateTime/duration` |
 | `util/CrashGuard.kt` | 全局 `UncaughtExceptionHandler`：堆栈写入 `files/crash/`（最多 5 份），下次启动 Toast 提示；**不吞异常** |
+| `util/DiagnosticsExporter.kt`（v1.0.4） | 生成诊断包 zip（`device.txt` 设备/版本/ABI、`library.txt` 媒体库统计与前 200 条清单、`crash/` 最近 5 份崩溃日志），经 `FileProvider` 分享；**不含视频内容** |
 | `ui/theme/Theme.kt` | 固定 `darkColorScheme`（primary `#B9A4FF`、background `#0C0C0E`…），不做动态取色，保证任何机型都是深色 |
 
 ---
@@ -409,7 +425,7 @@ cd "$root\AndroidVideoPlayer"
 AndroidVideoPlayer\app\build\outputs\apk\release\app-release.apk
 ```
 
-（`isMinifyEnabled=true` + `isShrinkResources=true` 均已开启，v1.0.2 的 release 产物 **约 3.0 MB**；比 v1.0.0 多出来的主要是 Room、WorkManager 与 coil-video。）
+（`isMinifyEnabled=true` + `isShrinkResources=true` 均已开启，v1.0.6 的 release 产物 **约 3.7 MB**；比 v1.0.0 多出来的主要是 Room、WorkManager、coil-video、media3-session 与字幕相关资源。）
 
 ### 5.5 安装到手机
 
@@ -418,7 +434,7 @@ AndroidVideoPlayer\app\build\outputs\apk\release\app-release.apk
 & "$root\_tools\sdk\platform-tools\adb.exe" devices
 & "$root\_tools\sdk\platform-tools\adb.exe" install -r "$root\AndroidVideoPlayer\app\build\outputs\apk\release\app-release.apk"
 # 或直接安装已导出的副本：
-& "$root\_tools\sdk\platform-tools\adb.exe" install -r "$root\VideoPlayer-1.0.2-release.apk"
+& "$root\_tools\sdk\platform-tools\adb.exe" install -r "$root\VideoPlayer-1.0.6-release.apk"
 ```
 
 也可以把 APK 拷进手机点安装（需在系统里允许“安装未知来源应用”）。
@@ -428,8 +444,8 @@ AndroidVideoPlayer\app\build\outputs\apk\release\app-release.apk
 
 ```powershell
 $bt = "$root\_tools\sdk\build-tools\34.0.0"
-& "$bt\apksigner.bat" verify --print-certs "$root\VideoPlayer-1.0.2-release.apk"
-& "$bt\aapt2.exe" dump badging "$root\VideoPlayer-1.0.2-release.apk" | Select-String "package:|sdkVersion|uses-permission"
+& "$bt\apksigner.bat" verify --print-certs "$root\VideoPlayer-1.0.6-release.apk"
+& "$bt\aapt2.exe" dump badging "$root\VideoPlayer-1.0.6-release.apk" | Select-String "package:|sdkVersion|uses-permission"
 ```
 
 实测结果：
@@ -438,12 +454,15 @@ $bt = "$root\_tools\sdk\build-tools\34.0.0"
 Verifies
 Verified using v2 scheme (APK Signature Scheme v2): true
 Signer #1 certificate DN: CN=Video Player Demo, OU=Demo, O=Demo, L=Beijing, ST=Beijing, C=CN
-package: name='com.example.videoplayer' versionCode='3' versionName='1.0.2' compileSdkVersion='34'
+package: name='com.example.videoplayer' versionCode='7' versionName='1.0.6' compileSdkVersion='34'
 sdkVersion:'24'  targetSdkVersion:'34'
 uses-permission: name='android.permission.MODIFY_AUDIO_SETTINGS'
 uses-permission: name='android.permission.READ_MEDIA_VIDEO'
 uses-permission: name='android.permission.READ_MEDIA_VISUAL_USER_SELECTED'
 uses-permission: name='android.permission.READ_EXTERNAL_STORAGE' maxSdkVersion='32'
+uses-permission: name='android.permission.FOREGROUND_SERVICE'
+uses-permission: name='android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK'
+uses-permission: name='android.permission.POST_NOTIFICATIONS'
 uses-permission: name='android.permission.WAKE_LOCK'
 uses-permission: name='android.permission.RECEIVE_BOOT_COMPLETED'
 uses-permission: name='com.example.videoplayer.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'   ← androidx 自动生成，无需关注
@@ -452,6 +471,44 @@ SHA-256: C9AF62B1137DE102BCBF2C3369E44FBB0B9981C248DA1E921A742857EF1EDEE4
 ```
 
 ---
+
+### 5.7 单元测试
+
+纯逻辑单测（格式化、错误码映射），跑在 JVM 上，不需要设备：
+
+```powershell
+& "$root\_tools\gradle-8.7\bin\gradle.bat" -p "$root\AndroidVideoPlayer" :app:testDebugUnitTest --no-daemon
+```
+
+测试代码在 `app/src/test/java/`，只依赖 `testImplementation(libs.junit)`，不会打进 APK。
+
+> ⚠️ **工程路径含中文时跑不了单测**：JVM 无法从含中文的 classpath 目录加载测试类，报
+> `java.lang.ClassNotFoundException: com.example.videoplayer.xxxTest`。
+> 只把 `GRADLE_USER_HOME` 指到 ASCII 路径**不够**——argfile 能打开了，但测试类仍然加载不到，
+> 必须让「工程所在的绝对路径」是纯 ASCII。
+>
+> 本仓库提供一键绕行脚本（自动同步到 `%TEMP%\vp_test` 再跑）：
+>
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File scripts\test-local.ps1
+> ```
+>
+> **编译和打 Release 包不受影响**，只有跑测试受影响；GitHub Actions 的 runner 路径本身是 ASCII，
+> CI 里直接 `./gradlew :app:testDebugUnitTest` 即可。
+
+### 5.8 CI（GitHub Actions）
+
+仓库根 `.github/workflows/android.yml`，push 到 `main`、开 PR、手动触发都会跑：
+
+1. JDK 17（temurin）+ `android-actions/setup-android`
+2. `./gradlew :app:testDebugUnitTest` —— 10 个用例，失败即红
+3. `./gradlew :app:assembleRelease` —— 没有 `keystore.properties` 时自动回退 debug 签名，保证任何人 clone 下来都能出包
+4. 上传产物 `app-release`（APK）；失败时额外上传 `test-report`
+
+`~/.gradle/caches` 有缓存（key 含 `libs.versions.toml` 哈希），首次约 6~8 分钟，命中缓存后 2~3 分钟。
+
+> 首次在 GitHub 上跑会顺带验证两件事：`settings.gradle.kts` 里的国内镜像在海外 runner 上是否可达，
+> 以及 Gradle wrapper 的腾讯镜像 `distributionUrl` 能否下载。任一条不通就把对应 URL 换回官方源。
 
 ## 六、权限说明
 
@@ -465,7 +522,8 @@ SHA-256: C9AF62B1137DE102BCBF2C3369E44FBB0B9981C248DA1E921A742857EF1EDEE4
 | `com.example.videoplayer.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` | androidx 自动生成 | 自用权限，无需关注 |
 | ~~`INTERNET`~~ | — | **不需要**：纯本地播放 |
 | ~~`ACCESS_NETWORK_STATE`~~ | media3 库清单合并 | **已用 `tools:node="remove"` 剔除**；将来加网络流播放再删掉那行 |
-| ~~`FOREGROUND_SERVICE`~~ | WorkManager 库清单合并 | **已用 `tools:node="remove"` 剔除**：导入是普通后台任务，不用前台服务 |
+| `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_MEDIA_PLAYBACK` | **v1.0.3 起需要**：后台播放用 `MediaSessionService`，播放时以 `mediaPlayback` 类型进入前台 | Android 14（targetSdk 34）起前台服务必须声明具体类型 |
+| `POST_NOTIFICATIONS` | **v1.0.3 起需要**：媒体通知在 Android 13+ 是运行时权限 | 拒绝后仍可后台播放，只是不显示通知 |
 
 > 不申请 `MANAGE_EXTERNAL_STORAGE`（全盘文件权限会被应用商店拒审）；
 > 也不申请 `POST_NOTIFICATIONS`——导入进度只在应用内展示，不发通知。
@@ -498,12 +556,20 @@ SHA-256: C9AF62B1137DE102BCBF2C3369E44FBB0B9981C248DA1E921A742857EF1EDEE4
 - 用户按 Home 时（`onUserLeaveHint()`）自动进入 PIP；PIP 模式下隐藏除画面外的所有 Compose 控件（`isInPictureInPictureMode` 判断），`PlayerView` 的 `useController` 保持 false，交给系统 PIP 窗口的播放/暂停。
 - 注意与现有沉浸式逻辑的冲突：进 PIP 前要 `show(systemBars())`，否则 PIP 窗口里没有系统 UI。
 
-### 2）后台播放 + MediaSession
+### 2）后台播放 + MediaSession（✅ v1.0.5 已升级为 MediaController 架构）
 
-- 加依赖 `androidx.media3:media3-session`，把 `ExoPlayer` 包进 `MediaSession`，用 `MediaSessionService` 承载（清单加 `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_MEDIA_PLAYBACK`，Android 14 还要声明 `foregroundServiceType="mediaPlayback"`）。
-- `PlayerViewModel` 改为绑定 Service（或用 `MediaController` 连接），播放状态从 `MediaController` 的 `Player.Listener` 拿。
-- 通知栏/锁屏/蓝牙耳机控制由 `MediaSession` 自动生成 `MediaStyle` 通知；音频焦点、`onTaskRemoved` 停止逻辑也要迁到 Service。
-- 好处：切后台不断播、支持车机/手表/耳机按键。
+- 依赖 `androidx.media3:media3-session`（1.4.1）。
+- v1.0.5 起播放器归 `PlaybackService` 所有：Service 内部 `ExoPlayer.Builder(...).build()`，
+  配 `MediaSession` 对外暴露会话；UI 侧 `PlayerViewModel` 用
+  `MediaController.Builder(app, SessionToken(...)).buildAsync()` 异步连接，
+  此后播放/暂停/seek/倍速全部通过控制器转发给 Service 的同一个播放器实例，
+  `PlayerView` 也渲染这个实例 —— 画面不跨进程，不需要 `PlayerSurface`。
+- 换来的是：旋转、切后台、锁屏、划走再回来，播放器都不受影响；通知栏 / 锁屏 / 耳机线控
+  与界面操作的是同一个播放器，状态天然一致（v1.0.3 的 `PlaybackHolder` 单例方案已删除）。
+- 清单：`FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_MEDIA_PLAYBACK`，
+  service 声明 `foregroundServiceType="mediaPlayback"`；`POST_NOTIFICATIONS` 启动时请求。
+- 已知取舍：`onTaskRemoved` 里暂停 + `stopSelf`，所以「划掉最近任务」会结束播放。
+  想保住播放需改成常驻前台服务（`startForeground` + 不 stopSelf），代价是通知栏常驻。
 
 ### 3）字幕外挂
 

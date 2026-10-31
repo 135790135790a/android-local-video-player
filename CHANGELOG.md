@@ -4,6 +4,129 @@
 
 ---
 
+## [1.0.6] - 2026-10-31
+
+versionCode: 7 · versionName: 1.0.6
+
+播放器完整性的最后一块：外挂字幕。
+
+### Added
+
+- **外挂字幕**：播放页底栏新增字幕按钮，从文件管理器选 `.srt` / `.vtt` / `.ass` / `.ssa`，交给 ExoPlayer 自带的 SubRip / WebVTT / SSA 解析器，不自己解析。
+  - 挂载后从**当前播放位置**重载（`setMediaItem(item, positionMs)`），不会跳回开头，原播放状态（播放中 / 暂停）保持。
+  - 字幕文件同样走 `takePersistableUriPermission`，下次进 App 仍可读。
+  - 已有字幕时点按钮弹菜单：「更换字幕」/「关闭字幕」。
+  - 关闭字幕只禁用文本轨（`setTrackTypeDisabled(TRACK_TYPE_TEXT, true)`），**不重载媒体**，播放不中断、缓冲不重来。
+- `res/drawable/ic_subtitles.xml`：自建 24dp vector（material-icons core 子集没有 subtitles 图标）。
+- `VideoSurface` 配置 `PlayerView.subtitleView` 样式：白字 + 半透明黑底 + 描边，底部留 12% 空白避免被进度条压住。
+
+### Changed
+
+- `PlayerUiState` 新增 `subtitleName`，换视频时清空；字幕按钮在已挂字幕时用主题色高亮。
+
+### Fixed
+
+- 无。
+
+### 已知限制
+
+- ASS/SSA 的特效标签（`{\an8}`、卡拉 OK 等）会被忽略，只保留文本与基本样式。
+- 字幕不随视频记忆：本次挂载只在本播放会话内有效，退出播放页后需重新选。
+- 各文件管理器对 `.srt` 报的 MIME 不统一，所以选择器用 `*/*`，选错格式会 Toast 提示。
+
+## [1.0.5] - 2026-10-31
+
+versionCode: 6 · versionName: 1.0.5
+
+`1.0.4 → 1.0.5` 是三块结构性升级合成的一个大包：连播 + 搜索排序（体验）、拆掉 ViewModel 的两个关注点（技术债）、后台播放改成正统 MediaController 架构（技术债，行为有变化）。
+
+### Added
+
+- **连播**：从媒体库打开视频时携带当前筛选/排序后的队列，一条播完自动播下一条；队尾或下一条文件已丢失时停在当前页。SAF / 相册的单文件播放不连播。
+- **媒体库搜索**：标题、路径、编码关键词实时过滤（250ms 防抖），无结果有空状态提示。
+- **媒体库排序**：最近导入 / 名称 / 文件大小 / 时长，四个维度切换，选择持久化在 SharedPreferences，重启后保留。
+- `player/AudioFocusController.kt`：音频焦点集中管理（GAIN / LOSS / LOSS_TRANSIENT / LOSS_TRANSIENT_CAN_DUCK，含「短暂丢失后按需续播」）。
+- `player/PositionPersister.kt`：播放位置独立落库（播放中每 5 秒 + 离开页面 + 播完归零），自带 scope，ViewModel 销毁后仍能写完最后一次。
+
+### Changed
+
+- **播放器实例归 Service 所有**：`PlaybackService` 内部创建 ExoPlayer 并配 `MediaSession`，UI 侧 `PlayerViewModel` 通过 `MediaController` 连接。
+  - 旋转、切后台、锁屏不再触碰播放器实例，播放连续性的保证从「ViewModel 不重建」升级为「播放器生命周期与 UI 完全解耦」。
+  - 通知栏 / 锁屏 / 耳机线控与界面操作的是同一个播放器，状态天然一致。
+  - `player/PlaybackHolder.kt`（旧的静态共享播放器）已删除。
+- `PlayerViewModel` ~650 行降到 ~600 行，音频焦点、进度落库两个关注点移出。
+- **行为变化**：从最近任务划掉 App 时 `PlaybackService.onTaskRemoved` 会暂停并停止服务，播放随之结束。需要「划掉也不停」得改用前台服务常驻方案。
+
+### Fixed
+
+- 连播遇到「文件已丢失」的条目不再把播放器打进错误态，直接跳过并停在当前页。
+- 进度落库不再依赖 `viewModelScope`，进程被回收的瞬间也能写完最后一次位置。
+- 预检拦截 / 播放错误对话框打开时屏蔽播放器手势，避免误触底层画面。
+
+### 已知限制
+
+- 仍无真机回归，三块改动都是「编译通过 + 静态审计」级别。
+- `MediaController` 连接是异步的，极少数情况下播放页会先显示一帧空白再出画面。
+
+## [1.0.4] - 2026-10-30
+
+versionCode: 5 · versionName: 1.0.4
+
+本版不新增功能，只补地基：可测试、可拆分、可诊断。
+
+### Added
+
+- **单元测试**：新增 JVM 单元测试（`app/src/test/`），覆盖 `Formatters`
+  （体积 / 码率 / 帧率 / 时长 / 时间）与 `PlaybackErrorMapper`（错误码 → 中文提示映射表），
+  `./gradlew :app:testDebugUnitTest` 可离线运行，不需要设备。
+- **VolumeController**：音量逻辑从 `PlayerViewModel` 抽成独立类，统一封装
+  `AudioManager.STREAM_MUSIC` 的读写、三档图标判定（静音 / 低 / 高）与音量持久化，
+  并监听系统音量变化同步 UI。
+
+### Changed
+
+- `PlayerViewModel` 移除音量相关的 `ContentObserver` 与 `AudioManager` 操作，
+  改为订阅 `VolumeController` 的状态流，类体量下降。
+- `PlaybackErrorMapper` 新增纯函数 `messageForCode(Int)`，
+  原 `toUserMessage(PlaybackException)` 委托给它，方便单元测试直接验证映射表。
+- `app/build.gradle.kts` 增加 `testImplementation(libs.junit)`（4.13.2，不打包进 APK）。
+
+### Fixed
+
+- 无。
+
+## [1.0.3] - 2026-10-30
+
+versionCode: 4 · versionName: 1.0.3
+
+### Added
+
+- **播放进度记忆**：媒体库里的视频记住上次看到的位置（`VideoEntity.lastPositionMs`），
+  再次打开自动续播。播放中每 5 秒落一次库，切后台、退出时各再落一次，
+  进程被系统杀掉也不丢进度；离结尾不足 3 秒视为「已看完」，下次从头播放。
+- **封面进度条**：媒体库网格每个封面底部叠加一条细进度条，一眼看出哪些看了一半。
+- **后台播放**：新增 `PlaybackService`（继承 `MediaSessionService`），播放时自动升起媒体通知，
+  支持通知栏播放/暂停/进度拖动、锁屏控件、蓝牙耳机与线控按键。
+  播放器实例仍由 `PlayerViewModel` 创建、通过 `PlaybackHolder` 共享给服务，
+  画面由 ExoPlayer 直接渲染到 `PlayerView`，不经过跨进程 Surface。
+- **通知权限**：Android 13+ 启动时请求 `POST_NOTIFICATIONS`，拒绝也不影响播放，
+  只是不显示媒体通知。
+
+### Changed
+
+- `onStop` 不再暂停播放：切到后台继续出声，回前台时画面从当前进度接上。
+  用户从最近任务划掉 App 时停止播放并退出，不做「划掉还在后台放声音」的行为。
+- `AndroidManifest.xml` 恢复 `FOREGROUND_SERVICE`，并新增
+  `FOREGROUND_SERVICE_MEDIA_PLAYBACK`（API 34 起前台服务必须声明类型）。
+- 新增依赖 `androidx.media3:media3-session`（1.4.1）。
+- `versionCode` 3 → 4，`versionName` "1.0.2" → "1.0.3"。
+
+### Fixed
+
+- 切后台时不再提前放弃音频焦点，来电恢复后仍能正确续播。
+
+---
+
 ## [1.0.2] - 2026-10-30
 
 versionCode: 3 · versionName: 1.0.2
