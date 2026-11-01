@@ -12,6 +12,9 @@ captures/
 *.dex
 *.class
 
+# R8 混淆映射（每个版本 20MB+，按需在本地保留，不进版本库）
+AndroidVideoPlayer/mapping/
+
 # 本地环境配置
 local.properties
 .env

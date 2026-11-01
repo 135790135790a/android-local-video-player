@@ -14,6 +14,10 @@ val keystoreProps = Properties().apply {
     }
 }
 
+/** 版本号集中在这里，defaultConfig 和 mapping 归档都用它，避免两处不一致。 */
+val appVersionCode = 11
+val appVersionName = "1.1.0"
+
 android {
     namespace = "com.example.videoplayer"
     compileSdk = 34
@@ -22,8 +26,8 @@ android {
         applicationId = "com.example.videoplayer"
         minSdk = 24
         targetSdk = 34
-        versionCode = 7
-        versionName = "1.0.6"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         vectorDrawables {
             useSupportLibrary = true
@@ -83,6 +87,24 @@ android {
 ksp {
     // 导出 Room schema，方便后续版本做 migration 检查
     arg("room.schemaLocation", "$projectDir/schemas")
+}
+
+/**
+ * 归档 R8 的 mapping.txt。
+ *
+ * 开了 minifyEnabled 之后，线上崩溃栈全是 `a.b.c()`，没有对应版本的 mapping.txt 就完全还原不出来。
+ * 每次 assembleRelease 结束顺手拷一份到根目录 mapping/ 下，按版本名区分，方便追溯。
+ */
+tasks.register<Copy>("archiveMapping") {
+    val mappingFile = layout.buildDirectory.file("outputs/mapping/release/mapping.txt")
+    from(mappingFile)
+    into(rootProject.layout.projectDirectory.dir("mapping"))
+    rename { "mapping-$appVersionName.txt" }
+    onlyIf { mappingFile.get().asFile.exists() }
+}
+
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    finalizedBy("archiveMapping")
 }
 
 dependencies {

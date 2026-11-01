@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    raw 资源保护声明。
+
+    SplashActivity 通过 R.raw.splash_intro 引用来拼 "android.resource://" URI，
+    正常情况下资源压缩器能识别这个引用，不会误删。
+
+    这里再显式 keep 一次作为防御：以后如果改成拼字符串常量、或者 R8 内联导致引用不可见，
+    也不会因为「看起来没人用」而被 shrinkResources 删掉。
+
+    注意：tools:keep 只保证资源不被删除，不阻止 AGP 8 的资源重命名 ——
+    release 包里这个视频的实际条目是 res/DS.mp4，resources.arsc 里的 raw/splash_intro 指向它。
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@raw/splash_intro" />

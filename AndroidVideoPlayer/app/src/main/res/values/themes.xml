@@ -6,4 +6,15 @@
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
+
+    <!--
+        启动画面主题：纯黑底 + 隐藏状态栏，避免从点图标到视频第一帧之间出现白屏或主题色闪烁。
+        视频本身铺在 VideoView 里，窗口背景只在解码前那一小段时间可见。
+    -->
+    <style name="Theme.VideoPlayer.Splash" parent="Theme.VideoPlayer">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:statusBarColor">@android:color/black</item>
+        <item name="android:navigationBarColor">@android:color/black</item>
+    </style>
 </resources>

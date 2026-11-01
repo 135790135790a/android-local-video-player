@@ -60,6 +60,7 @@ import com.example.videoplayer.util.toPlaybackTime
 fun PlayerTopBar(
     title: String,
     onBack: () -> Unit,
+    onEnterPip: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -87,8 +88,19 @@ fun PlayerTopBar(
             style = MaterialTheme.typography.titleMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(end = 16.dp)
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .padding(end = 8.dp)
         )
+        if (onEnterPip != null) {
+            IconButton(onClick = onEnterPip) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_pip),
+                    contentDescription = "进入画中画",
+                    tint = Color.White
+                )
+            }
+        }
     }
 }
 

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    启动画面布局。
+
+    - 根布局全屏黑底，点击任意处跳过
+    - 用 media3 的 PlayerView 而不是系统 VideoView：
+      VideoView 底层是 SurfaceView，在部分 ROM 与全屏窗口组合下会出现「解码正常但画面不显示」的黑屏，
+      改用 TextureView（surface_type=texture_view）走普通的 Compose/View 绘制链路，兼容性更好。
+    - resize_mode=fit：保持视频原始宽高比居中，横屏视频在竖屏手机上就是上下留黑边
+    - 右下角「跳过」按钮
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/splash_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black"
+    android:clickable="true"
+    android:focusable="true">
+
+    <androidx.media3.ui.PlayerView
+        android:id="@+id/splash_player"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center"
+        android:background="@android:color/black"
+        app:resize_mode="fit"
+        app:show_buffering="never"
+        app:surface_type="texture_view"
+        app:use_controller="false" />
+
+    <TextView
+        android:id="@+id/splash_skip"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="24dp"
+        android:background="@drawable/bg_splash_skip"
+        android:paddingHorizontal="20dp"
+        android:paddingVertical="10dp"
+        android:text="@string/splash_skip"
+        android:textColor="#FFFFFFFF"
+        android:textSize="14sp" />
+
+</FrameLayout>

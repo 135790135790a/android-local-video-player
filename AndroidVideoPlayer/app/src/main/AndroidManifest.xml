@@ -53,17 +53,28 @@
         android:theme="@style/Theme.VideoPlayer"
         tools:targetApi="34">
 
+        <!--
+            启动画面：launcher 入口，播完 15 秒开场动画后进 MainActivity。
+            noHistory=true 让它进主界面后从任务栈里彻底移除，按返回键不会倒回开场动画。
+        -->
         <activity
-            android:name=".MainActivity"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:name=".SplashActivity"
             android:exported="true"
-            android:launchMode="singleTop"
-            android:theme="@style/Theme.VideoPlayer">
+            android:noHistory="true"
+            android:theme="@style/Theme.VideoPlayer.Splash">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:supportsPictureInPicture="true"
+            android:theme="@style/Theme.VideoPlayer" />
 
         <!--
             后台播放 + 媒体通知 + 锁屏/耳机按键。

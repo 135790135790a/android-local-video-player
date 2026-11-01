@@ -1,17 +1,22 @@
 package com.example.videoplayer.ui.player
 
 import android.app.Activity
+import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
+import android.util.Rational
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -63,6 +68,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.example.videoplayer.player.PlayerViewModel
 import com.example.videoplayer.player.VideoSource
+import com.example.videoplayer.ui.LocalPipMode
 import kotlinx.coroutines.delay
 
 private const val AUTO_HIDE_DELAY_MS = 3_000L
@@ -110,6 +116,12 @@ fun PlayerScreen(
     var controlsVisible by remember { mutableStateOf(true) }
     var interactionKey by remember { mutableIntStateOf(0) }
     var showCheckingIndicator by remember { mutableStateOf(false) }
+
+    // 屏幕亮度：只改当前窗口属性，不动系统设置，退出播放页立刻恢复原亮度
+    var brightnessPercent by remember(activity) {
+        val current = activity?.window?.attributes?.screenBrightness ?: -1f
+        mutableIntStateOf(if (current in 0f..1f) (current * 100).toInt() else 50)
+    }
 
     fun poke() {
         controlsVisible = true
@@ -191,8 +203,10 @@ fun PlayerScreen(
         onBack()
     }
 
+    val inPip = LocalPipMode.current
     val overlayOpen = state.errorMessage != null || state.preflightBlock != null
-    val barsVisible = controlsVisible && !overlayOpen
+    // 画中画窗口只有巴掌大，控制栏会盖住画面，整体隐藏
+    val barsVisible = controlsVisible && !overlayOpen && !inPip
 
     Box(
         modifier = Modifier
@@ -205,6 +219,7 @@ fun PlayerScreen(
         if (!overlayOpen) {
             GestureLayer(
                 volumePercent = state.volumePercent,
+                brightnessPercent = brightnessPercent,
                 onSingleTap = {
                     if (controlsVisible) {
                         viewModel.togglePlayPause()
@@ -215,12 +230,31 @@ fun PlayerScreen(
                     viewModel.togglePlayPause()
                     poke()
                 },
+                onLongPress = {
+                    viewModel.toggleSpeedBoost()
+                    poke()
+                },
                 onSeekBy = { deltaMs ->
                     viewModel.seekBy(deltaMs)
                     poke()
                 },
                 onVolumeStep = { steps ->
                     viewModel.adjustVolumeBy(steps)
+                    poke()
+                },
+                onBrightnessStep = { steps ->
+                    activity?.window?.let { window ->
+                        val attrs = window.attributes
+                        val current = if (attrs.screenBrightness in 0f..1f) {
+                            attrs.screenBrightness
+                        } else {
+                            0.5f
+                        }
+                        val next = (current + steps * 0.08f).coerceIn(0.05f, 1f)
+                        attrs.screenBrightness = next
+                        window.attributes = attrs
+                        brightnessPercent = (next * 100).toInt()
+                    }
                     poke()
                 },
                 modifier = Modifier.fillMaxSize()
@@ -270,6 +304,13 @@ fun PlayerScreen(
                     onBack = {
                         viewModel.pause()
                         onBack()
+                    },
+                    onEnterPip = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            activity?.enterPip()
+                        } else {
+                            Toast.makeText(context, "当前系统版本不支持画中画", Toast.LENGTH_SHORT).show()
+                        }
                     },
                     modifier = Modifier.align(Alignment.TopCenter)
                 )
@@ -517,4 +558,21 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null
+}
+
+/**
+ * 进入画中画。
+ *
+ * 比例固定 9:16（手机竖屏视频最常见），部分 ROM 会忽略这个值按自己的比例显示，不影响功能。
+ * 失败（比如系统设置里禁用了画中画）直接忽略，不打断播放。
+ */
+@RequiresApi(Build.VERSION_CODES.O)
+private fun Activity.enterPip() {
+    runCatching {
+        enterPictureInPictureMode(
+            PictureInPictureParams.Builder()
+                .setAspectRatio(Rational(9, 16))
+                .build()
+        )
+    }
 }

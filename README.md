@@ -8,14 +8,14 @@
 | 项目 | 值 |
 | --- | --- |
 | 包名 / applicationId | `com.example.videoplayer` |
-| versionCode / versionName | `7` / `1.0.6` |
+| versionCode / versionName | `11` / `1.1.0` |
 | minSdk / targetSdk / compileSdk | `24` / `34` / `34` |
 | 语言 / UI | Kotlin + Jetpack Compose + Material 3 |
 | 架构 | MVVM（`AndroidViewModel` + `StateFlow`）+ Room + WorkManager |
 | 播放内核 | `androidx.media3:media3-exoplayer` + `media3-ui` 1.4.1 |
 | 数据层 | Room 2.6.1（KSP）、WorkManager 2.9.1、Coil 2.7.0（coil-compose + coil-video） |
 | Gradle | AGP 8.5.2 / Gradle 8.7 / Kotlin 2.0.21 / JVM 17 |
-| release APK | `VideoPlayer-1.0.6-release.apk`，约 3.7 MB，APK Signature Scheme v2 |
+| release APK | `VideoPlayer-1.1.0-release.apk`，约 7.3 MB（含 3.6 MB 开场动画），APK Signature Scheme v2 |
 
 ---
 
@@ -36,6 +36,10 @@
 | **媒体库搜索 + 排序（v1.0.5）** | `ui/library/LibraryViewModel.kt`（`setQuery` / `setSort`） | 标题/路径/编码关键词 250ms 防抖过滤；最近导入/名称/大小/时长四维排序，选择存 SharedPreferences |
 | **后台播放（v1.0.5）** | `player/PlaybackService.kt` + `MediaController` | 播放器归 Service 所有，UI 通过 `MediaController` 连接；通知栏/锁屏/耳机键与界面操作同一个播放器 |
 | **外挂字幕（v1.0.6）** | `PlayerViewModel.attachSubtitle` + `VideoSurface` 字幕样式 | 支持 `.srt` / `.vtt` / `.ass` / `.ssa`，走 ExoPlayer 自带解析器；从当前位置重载不跳回开头，关闭只禁用文本轨不重载 |
+| **启动动画（v1.0.7）** | `SplashActivity.kt` + `res/raw/splash_intro.mp4` | 冷启动全屏静音播放 15 秒 720p 开场动画；播完 / 点击任意处 / 「跳过」按钮 / 播放出错 / 20 秒超时 五种方式进入主界面 |
+| **画中画（v1.1.0）** | `PlayerTopBar` 的 PiP 按钮 + `MainActivity.onPictureInPictureModeChanged` | Android 8.0+，`enterPictureInPictureMode` 固定 9:16；PiP 里通过 `LocalPipMode` 隐藏全部控件 |
+| **左半屏亮度手势（v1.1.0）** | `ui/player/PlayerGestures.kt` | 上下滑动时按落点分左右：左调 `window.attributes.screenBrightness`，右调媒体音量；不动系统设置 |
+| **长按 2 倍速（v1.1.0）** | `PlayerViewModel.toggleSpeedBoost()` | 长按画面在 2x / 1x 间切换，**不写偏好**，退出播放页仍用设置里的倍速 |
 | 播放/暂停、点画面切换 | `PlayerViewModel.togglePlayPause()` / `PlayerScreen` | 单击＝控件可见时切换、控件隐藏时先唤出；双击＝直接切换 |
 | 暂停时中央大播放按钮 | `PlayerControls.CenterPlayButton` | 76dp `FilledIconButton`，仅在暂停且控件可见时显示 |
 | 进度条（拖动只改文字、松手才 seek） | `PlayerControls.ProgressRow` | 拖动期间只更新本地 `dragValue`，`onValueChangeFinished` 才 `onSeek` |
@@ -70,8 +74,8 @@
 ```
 视频播放器/                                  ← 工作区根目录
 ├── README.md                               ← 本文档
-├── VideoPlayer-1.0.6-release.apk           ← 已构建好的签名安装包（约 3.7 MB）
-├── CHANGELOG.md                            ← 版本变更记录（v1.0.0 → v1.0.6）
+├── VideoPlayer-1.1.0-release.apk           ← 已构建好的签名安装包（约 7.3 MB，含开场动画）
+├── CHANGELOG.md                            ← 版本变更记录（v1.0.0 → v1.1.0）
 ├── .github/workflows/android.yml           ← CI：单测 + assembleRelease + 产物上传
 ├── scripts/test-local.ps1                  ← 本地跑单测的绕行脚本（中文路径 → %TEMP%）
 ├── AndroidVideoPlayer/                     ← Gradle 工程根
@@ -82,6 +86,7 @@
 │   ├── keystore.properties                 ★ 签名配置（口令，勿外传）
 │   ├── keystore/
 │   │   └── release.keystore                ★ 自签名证书（RSA 2048 / 10000 天）
+│   ├── mapping/                            R8 混淆映射归档（assembleRelease 后生成，不进版本库）
 │   ├── gradle/
 │   │   ├── libs.versions.toml              版本目录
 │   │   └── wrapper/
@@ -93,7 +98,8 @@
 │       └── src/main/
 │           ├── AndroidManifest.xml         清单（相册权限三档 + MODIFY_AUDIO_SETTINGS）
 │           ├── java/com/example/videoplayer/
-│           │   ├── MainActivity.kt         宿主 Activity、生命周期转发、旧数据迁移
+│           │   ├── MainActivity.kt         宿主 Activity、生命周期转发、旧数据迁移、画中画状态
+│           │   ├── SplashActivity.kt       启动画面：全屏静音播开场动画，可跳过
 │           │   ├── data/
 │           │   │   ├── MediaLibrary.kt     ★ 私有目录复制 / 空间检查 / 重名 / 校验和
 │           │   │   ├── VideoProbe.kt       MediaExtractor + Retriever 探测分辨率与编码
@@ -119,6 +125,7 @@
 │           │   │   └── PositionPersister.kt    v1.0.5 播放位置独立落库
 │           │   ├── ui/
 │           │   │   ├── AppRoot.kt          首页（媒体库 / 相册 两个 Tab）+ 播放页切换
+│           │   │   ├── LocalPipMode.kt      v1.1.0 画中画状态（CompositionLocal）
 │           │   │   ├── gallery/
 │           │   │   │   ├── GalleryScreen.kt    相册页（已退化为导入来源）
 │           │   │   │   └── GalleryViewModel.kt 相册权限矩阵 + MediaStore 查询
@@ -129,7 +136,7 @@
 │           │   │   ├── player/
 │           │   │   │   ├── PlayerScreen.kt    ★ 播放页（全屏/自动隐藏/手势编排）
 │           │   │   │   ├── PlayerControls.kt  顶栏、底栏、进度条、倍速、错误弹窗
-│           │   │   │   ├── PlayerGestures.kt  点击/双击/滑动识别层
+│           │   │   │   ├── PlayerGestures.kt  点击/双击/长按/滑动识别层（左亮度右音量）
 │           │   │   │   └── VideoSurface.kt    PlayerView 的 Compose 封装
 │           │   │   └── theme/Theme.kt      深色配色 + 字体
 │           │   └── util/
@@ -140,19 +147,17 @@
 │           │       ├── CrashGuard.kt       未捕获异常兜底（写崩溃日志）
 │           │       └── DiagnosticsExporter.kt  v1.0.4 导出诊断包（设备信息+媒体库+崩溃日志）
 │           └── res/
-│               ├── layout/player_view.xml  PlayerView（texture_view，关内置控制条）
+│               ├── layout/
+│               │   ├── player_view.xml     PlayerView（texture_view，关内置控制条）
+│               │   └── activity_splash.xml 启动画面（media3 PlayerView + 跳过按钮）
+│               ├── raw/splash_intro.mp4    ★ 开场动画（15s / 720p / 静音，3.6 MB）
 │               ├── drawable/               ic_pause / ic_volume_{up,down,off} /
 │               │                           ic_fullscreen{,_exit} / ic_speed /
+│               │                           ic_subtitles / ic_pip / bg_splash_skip /
 │               │                           ic_launcher_foreground
 │               ├── mipmap-*/               ic_launcher(.round) 各密度图标
 │               ├── mipmap-anydpi-v26/      adaptive-icon 定义
 │               └── values/                 strings / colors / themes
-└── _tools/                                 本机构建工具链（JDK17、Gradle、Android SDK，可删）
-    ├── jdk17/                               OpenJDK 17.0.2
-    ├── gradle-8.7/                          Gradle 发行版
-    ├── sdk/                                 Android SDK（platform-tools / platforms/android-34 / build-tools/34.0.0）
-    ├── gradle-home/                         GRADLE_USER_HOME（依赖缓存）
-    └── downloads/                           安装时下载的 zip 原件
 └── _tools/                                 本机构建工具链（JDK17、Gradle、Android SDK，可删）
     ├── jdk17/                               OpenJDK 17.0.2
     ├── gradle-8.7/                          Gradle 发行版
@@ -200,6 +205,7 @@
 | 文件 | 作用 / 关键点 |
 | --- | --- |
 | `MainActivity.kt` | `enableEdgeToEdge()` + `setContent { VideoPlayerTheme { AppRoot(playerViewModel) } }`；`by viewModels<PlayerViewModel>()`；启动时后台跑 `LegacyMigrator.migrateIfNeeded()`；`onStart→onHostStart()`、`onStop→onHostStop()`、`onDestroy` 里**只有非配置变更**才 `releasePlayer()` |
+| `SplashActivity.kt` | 启动画面：把 `R.raw.splash_intro` 复制到 `cacheDir/splash_intro_<versionCode>.mp4`，用 `ExoPlayer` + `PlayerView(texture_view)` 静音播放；`goMain()` 由「播完 / 点击根布局 / 跳过按钮 / `Player.Listener.onPlayerError` / 20 秒超时」五种情况触发，`hasLeft` 保证只跳一次 |
 | `ui/AppRoot.kt` | 不引 navigation-compose：`TabRow` 切「媒体库 / 相册」，`var showPlayer by rememberSaveable` 切播放页；SAF 选片走 `OpenDocument()` + `takePersistableUriPermission` 后直接 `libraryViewModel.importUris(...)`；相册 `onPlay` 也是入库，完成后 Toast 提示 |
 | `ui/library/LibraryScreen.kt` | 头部标题 + 刷新/导入菜单（DropdownMenu：从相册 / 从文件）；`UsageCard` 三格统计；`ImportBanner`（Running 显示 `LinearProgressIndicator` + 取消，Finished 显示成功/失败/跳过）；空态 `EmptyLibrary`；`LazyVerticalGrid` 3 列（≥600dp 5 列）；`VideoTile` 用 `AppImageLoader` 解首帧 + 时长/分辨率角标 + Info 按钮 + `SOURCE_LOST` 黑罩 |
 | `ui/library/LibraryViewModel.kt` | `videos: StateFlow<List<VideoEntity>>`（`stateIn(WhileSubscribed(5s))`）；`importUris(List<Uri>)` 建 `OneTimeWorkRequest` 并订阅 `getWorkInfoByIdFlow` 映射成 `ImportState`；`deleteVideo`（DB + 文件）、`markPlayed`、`reconcileWithDisk()`（数据库与磁盘对账） |

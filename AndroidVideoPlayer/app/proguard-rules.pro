@@ -25,3 +25,11 @@
 # ---- Kotlin ----
 -keepclassmembers class **$WhenMappings { <fields>; }
 -dontwarn kotlin.**
+
+# ---- 启动动画资源（v1.0.7）----
+# 防御性 keep：SplashActivity 用 R.raw.splash_intro 拼 "android.resource://" URI。
+# 如果以后改成字符串常量、或 R8 内联导致字段引用不可见，资源压缩器可能把它当未使用资源删掉；
+# 这里保留 R$raw 里的这个字段，让资源引用对压缩器始终可见。
+-keep class com.example.videoplayer.R$raw {
+    public static int splash_intro;
+}

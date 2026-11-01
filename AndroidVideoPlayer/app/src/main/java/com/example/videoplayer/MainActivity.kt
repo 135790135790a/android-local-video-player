@@ -2,6 +2,7 @@ package com.example.videoplayer
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -12,12 +13,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.videoplayer.data.LegacyMigrator
 import com.example.videoplayer.player.PlayerViewModel
 import com.example.videoplayer.ui.AppRoot
+import com.example.videoplayer.ui.LocalPipMode
 import com.example.videoplayer.ui.theme.VideoPlayerTheme
 import com.example.videoplayer.util.CrashGuard
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +30,9 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
 
     private val viewModel: PlayerViewModel by viewModels()
+
+    /** 画中画状态：播放页据此隐藏控制栏（PiP 窗口太小，控件会盖住画面） */
+    private val pipMode = mutableStateOf(false)
 
     /**
      * Android 13 起通知是运行时权限。
@@ -52,8 +59,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             VideoPlayerTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    AppRoot(playerViewModel = viewModel)
+                CompositionLocalProvider(LocalPipMode provides pipMode.value) {
+                    Surface(modifier = Modifier.fillMaxSize()) {
+                        AppRoot(playerViewModel = viewModel)
+                    }
                 }
             }
         }
@@ -88,5 +97,13 @@ class MainActivity : ComponentActivity() {
         if (!isChangingConfigurations) {
             viewModel.releasePlayer()
         }
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        pipMode.value = isInPictureInPictureMode
     }
 }

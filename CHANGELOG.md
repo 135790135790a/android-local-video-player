@@ -4,6 +4,97 @@
 
 ---
 
+## [1.1.0] - 2026-11-01
+
+versionCode: 11 · versionName: 1.1.0
+
+播放器能力补齐：画中画、亮度手势、长按加速，外加两项工程改进。
+
+### Added
+
+- **画中画**：播放页顶栏新增画中画按钮（Android 8.0+）。进小窗后自动隐藏全部控件，只留画面；点小窗回到全屏继续播。系统里禁用画中画的机型会 Toast 提示，不影响正常播放。
+- **左半屏亮度手势**：上下滑动时，右半屏调媒体音量、左半屏调屏幕亮度，与主流播放器一致。亮度只改当前窗口属性，退出播放页立即恢复系统亮度，不动系统设置。
+- **长按 2 倍速**：长按画面在 2x 与原速之间切换，临时加速不写入偏好。
+
+### Changed
+
+- **缩略图磁盘缓存**：Coil 的磁盘缓存显式放大到 5%，视频抽帧结果落盘，第二次进媒体库基本不再重新解一遍视频，滚动更顺。
+- **R8 mapping 归档**：新增 `archiveMapping` 任务，每次 `assembleRelease` 后自动把 `mapping.txt` 拷到根目录 `mapping/`，按版本名命名，用于还原线上崩溃栈。
+- 版本号集中到 `app/build.gradle.kts` 顶部的 `appVersionCode` / `appVersionName`，避免两处不同步。
+
+### Fixed
+
+- 无
+
+### 已知限制
+
+- 画中画比例固定 9:16，部分 ROM 会忽略该值按自己的比例显示，横屏视频在小窗里会带黑边。
+- 亮度手势改的是窗口亮度，不写系统设置；下次进入播放页从系统亮度重新开始。
+- 长按加速是 2x 与原速二选一，不是「按住加速、松手恢复」（Compose 的 `detectTapGestures` 只给长按触发点）。
+
+---
+
+## [1.0.9] - 2026-10-31
+
+versionCode: 10 · versionName: 1.0.9
+
+彻底修复开场动画黑屏。
+
+### Fixed
+
+- **黑屏根因**：v1.0.7 / v1.0.8 用的是系统 `VideoView`，它底层是 `SurfaceView`。在这类机型上解码正常、也不触发 `onError`，但 Surface 始终不出画面，表现就是纯黑屏、只剩右下角「跳过」按钮可点。
+- 改用 `media3` 的 `PlayerView`（`surface_type="texture_view"`）：走普通 View 的绘制链路，不依赖独立 Surface 合成，兼容性明显更好。
+- 播放器换成 `ExoPlayer`（工程本就依赖 media3），播放出错时 Toast 打出 `errorCodeName` 便于定位具体机型。
+
+### Changed
+
+- `activity_splash.xml` 里 `VideoView` 换成 `androidx.media3.ui.PlayerView`。
+
+---
+
+## [1.0.8] - 2026-10-31
+
+versionCode: 9 · versionName: 1.0.8
+
+修复 v1.0.7 开场动画黑屏。
+
+### Fixed
+
+- **开场动画黑屏**：`VideoView.setVideoURI("android.resource://…")` 要走 `ContentResolver` 打开 raw 资源，部分 ROM（MIUI / HyperOS 上很常见）会打开失败，随即被 `setOnErrorListener` 兜底跳过，表现就是「黑一下就进主界面」。
+  改为先把 raw 视频复制到 `cacheDir/splash_intro_<versionCode>.mp4`，再用普通文件路径 `setVideoPath(...)` 播放，走最通用的播放路径。
+- 复制失败或播放报错时，弹 Toast 打出 `what/extra` 错误码，方便后续定位具体机型。
+
+### Changed
+
+- 缓存文件名带 `versionCode`，App 升级后旧缓存自然失效，不需要额外清理逻辑。
+
+---
+
+## [1.0.7] - 2026-10-31
+
+versionCode: 8 · versionName: 1.0.7
+
+冷启动时先播一段 15 秒开场动画，再进主界面。
+
+### Added
+
+- **启动动画**：`SplashActivity` 全屏静音播放 `res/raw/splash_intro.mp4`（720p / 15s），播完自动进入 `MainActivity`
+  - 点击屏幕任意处、或点右下角「跳过」按钮，可随时跳过
+  - 播放器报错、或 20 秒仍未结束时兜底直跳主界面，绝不卡在启动页
+  - 启动页刻意做得很轻：不初始化 ViewModel、不碰数据库、不申请权限，缩短点图标到出画面的时间
+- `res/layout/activity_splash.xml`、`res/drawable/bg_splash_skip.xml`、`Theme.VideoPlayer.Splash`（纯黑底 + 隐藏状态栏，避免从点图标到视频第一帧之间出现白屏）
+
+### Changed
+
+- launcher 入口从 `MainActivity` 改为 `SplashActivity`；`SplashActivity` 声明 `noHistory=true`，进主界面后按返回键不会退回开场动画
+- APK 体积因内置 3.6 MB 视频而增加
+
+### Fixed
+
+- 无
+
+---
+
 ## [1.0.6] - 2026-10-31
 
 versionCode: 7 · versionName: 1.0.6

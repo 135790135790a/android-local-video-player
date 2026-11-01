@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">本地视频播放器</string>
+    <string name="splash_skip">跳过</string>
 </resources>

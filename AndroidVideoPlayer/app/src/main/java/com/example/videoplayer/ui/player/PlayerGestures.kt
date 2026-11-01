@@ -31,16 +31,20 @@ import kotlin.math.abs
  *
  * - 单击：控件可见时播放/暂停，控件隐藏时先唤出控件
  * - 双击：播放/暂停
+ * - 长按：在 2 倍速与原速之间切换（临时加速，不改设置里的默认倍速）
  * - 左右滑动：松手后快进 / 快退 10 秒
- * - 上下滑动：按格调节系统媒体音量
+ * - 上下滑动：**右半屏调媒体音量，左半屏调屏幕亮度**（与主流播放器一致）
  */
 @Composable
 fun GestureLayer(
     volumePercent: Int,
+    brightnessPercent: Int,
     onSingleTap: () -> Unit,
     onDoubleTap: () -> Unit,
+    onLongPress: () -> Unit,
     onSeekBy: (Long) -> Unit,
     onVolumeStep: (Int) -> Unit,
+    onBrightnessStep: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var hint by remember { mutableStateOf<String?>(null) }
@@ -61,12 +65,20 @@ fun GestureLayer(
                     val minDragPx = 48.dp.toPx()
                     var totalX = 0f
                     var totalY = 0f
-                    var volumeAccum = 0f
+                    var verticalAccum = 0f
+                    // 手指落点在屏幕左半边 -> 调亮度；右半边 -> 调音量
+                    var onLeftSide = false
+                    // 本地累计值，避免依赖外部 state 更新带来的提示滞后
+                    var localBrightness = brightnessPercent
+                    var localVolume = volumePercent
                     detectDragGestures(
-                        onDragStart = {
+                        onDragStart = { offset ->
                             totalX = 0f
                             totalY = 0f
-                            volumeAccum = 0f
+                            verticalAccum = 0f
+                            onLeftSide = offset.x < size.width / 2f
+                            localBrightness = brightnessPercent
+                            localVolume = volumePercent
                         },
                         onDragEnd = {
                             if (abs(totalX) > abs(totalY) && abs(totalX) >= minDragPx) {
@@ -82,14 +94,20 @@ fun GestureLayer(
                             if (abs(totalX) >= abs(totalY)) {
                                 hint = if (totalX >= 0f) "松开快进 10 秒" else "松开快退 10 秒"
                             } else {
-                                volumeAccum += dragAmount.y
-                                val steps = (volumeAccum / stepPx).toInt()
+                                verticalAccum += dragAmount.y
+                                val steps = (verticalAccum / stepPx).toInt()
                                 if (steps != 0) {
-                                    // 手指向下 -> 音量减小
-                                    onVolumeStep(-steps)
-                                    volumeAccum -= steps * stepPx
+                                    // 手指向下 -> 减小
+                                    if (onLeftSide) {
+                                        onBrightnessStep(-steps)
+                                        localBrightness = (localBrightness - steps).coerceIn(0, 100)
+                                    } else {
+                                        onVolumeStep(-steps)
+                                        localVolume = (localVolume - steps * VOLUME_STEP_PERCENT).coerceIn(0, 100)
+                                    }
+                                    verticalAccum -= steps * stepPx
                                 }
-                                hint = "音量 $volumePercent%"
+                                hint = if (onLeftSide) "亮度 $localBrightness%" else "音量 $localVolume%"
                             }
                         }
                     )
@@ -97,7 +115,8 @@ fun GestureLayer(
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = { onSingleTap() },
-                        onDoubleTap = { onDoubleTap() }
+                        onDoubleTap = { onDoubleTap() },
+                        onLongPress = { onLongPress() }
                     )
                 }
         )
@@ -121,3 +140,6 @@ fun GestureLayer(
 }
 
 private const val SEEK_STEP_MS = 10_000L
+
+/** 音量按系统档位估算的百分比：一格大约 6%，与 [VolumeController] 的步进量保持同量级。 */
+private const val VOLUME_STEP_PERCENT = 6

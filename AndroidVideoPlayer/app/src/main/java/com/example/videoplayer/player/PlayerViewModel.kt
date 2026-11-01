@@ -493,6 +493,19 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
         prefs.edit().putFloat(KEY_SPEED, speed).apply()
     }
 
+    /**
+     * 长按画面临时加速：在 2 倍速与原速之间来回切。
+     *
+     * 不写偏好——这是「临时看一下」的操作，下次进播放页仍用设置里记住的倍速。
+     */
+    fun toggleSpeedBoost() {
+        if (released) return
+        val p = player ?: return
+        val target = if (p.playbackParameters.speed > 1.5f) 1f else 2f
+        p.setPlaybackSpeed(target)
+        _uiState.update { it.copy(speed = target) }
+    }
+
     fun speedLabel(speed: Float): String =
         if (speed == speed.toInt().toFloat()) "${speed.toInt()}.0x" else "${speed}x"
 
