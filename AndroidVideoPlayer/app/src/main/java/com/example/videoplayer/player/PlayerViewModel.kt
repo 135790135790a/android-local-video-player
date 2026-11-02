@@ -9,11 +9,14 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.example.videoplayer.data.Playability
@@ -45,6 +48,15 @@ enum class VideoSource { SAF, GALLERY, RECENT, LIBRARY }
 /** 播放前的预检拦截结论，等用户决定是否仍然强播。 */
 data class PreflightBlock(val reason: String, val detail: String)
 
+/**
+ * 一条可选的音轨。
+ *
+ * @param index 在「音频轨组列表」中的下标，不是 TrackGroup 的全局下标
+ * @param label 展示用文案，例如「中文 · 立体声」
+ * @param isSelected 当前是否正在使用
+ */
+data class AudioTrackOption(val index: Int, val label: String, val isSelected: Boolean)
+
 data class PlayerUiState(
     val videoName: String = "",
     val videoUri: String = "",
@@ -68,7 +80,11 @@ data class PlayerUiState(
     /** 本次播放的来源页面。 */
     val source: VideoSource = VideoSource.SAF,
     /** 当前挂载的外挂字幕文件名；null 表示没有字幕 */
-    val subtitleName: String? = null
+    val subtitleName: String? = null,
+    /** 可切换的音轨；只有一条时不展示切换入口 */
+    val audioTracks: List<AudioTrackOption> = emptyList(),
+    /** 睡眠定时器剩余毫秒，0 表示未激活 */
+    val sleepTimerRemainingMs: Long = 0L
 )
 
 /**
@@ -105,6 +121,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
     val player: Player? get() = controller
 
     private var progressJob: Job? = null
+    private var sleepTimerJob: Job? = null
     private var released = false
     private var openRequestId = 0
     private val volumeController = VolumeController(application)
@@ -431,6 +448,104 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
         _uiState.update { it.copy(subtitleName = null) }
     }
 
+    // ------------------------------------------------------------------
+    // 音轨切换
+    // ------------------------------------------------------------------
+
+    /**
+     * 切换到第 [index] 条音轨。
+     *
+     * 用 [TrackSelectionOverride] 只覆盖音频类型，视频轨和字幕轨保持原样；
+     * 参数会被 MediaController 跨进程同步给服务里的播放器。
+     */
+    fun selectAudioTrack(index: Int) {
+        if (released) return
+        val p = player ?: return
+        val groups = p.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+        val group = groups.getOrNull(index)?.mediaTrackGroup ?: return
+        runCatching {
+            p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+                .setOverrideForType(TrackSelectionOverride(group, listOf(0)))
+                .build()
+        }
+        refreshAudioTracks()
+    }
+
+    /** 从播放器当前状态重建音轨列表 */
+    private fun refreshAudioTracks() {
+        if (released) return
+        val p = player ?: return
+        val options = p.currentTracks.groups
+            .filter { it.type == C.TRACK_TYPE_AUDIO }
+            .mapIndexed { index, group ->
+                AudioTrackOption(
+                    index = index,
+                    label = audioLabel(group.mediaTrackGroup.getFormat(0)),
+                    isSelected = group.isSelected
+                )
+            }
+        _uiState.update { it.copy(audioTracks = options) }
+    }
+
+    /** 音轨文案：优先用容器里的轨道名，其次语言，最后补声道数 */
+    private fun audioLabel(format: Format): String {
+        val name = format.label?.takeIf { it.isNotBlank() }
+        val lang = format.language?.takeIf { it.isNotBlank() }?.let(::languageName)
+        val head = listOfNotNull(name, lang).distinct().joinToString(" · ").ifBlank { "默认音轨" }
+        return when (format.channelCount) {
+            0 -> head
+            1 -> "$head · 单声道"
+            2 -> "$head · 立体声"
+            else -> "$head · ${format.channelCount} 声道"
+        }
+    }
+
+    private fun languageName(code: String): String = when (code.substringBefore('-').lowercase()) {
+        "zh" -> "中文"
+        "en" -> "英语"
+        "ja" -> "日语"
+        "ko" -> "韩语"
+        "fr" -> "法语"
+        "de" -> "德语"
+        "es" -> "西班牙语"
+        "ru" -> "俄语"
+        else -> code
+    }
+
+    // ------------------------------------------------------------------
+    // 睡眠定时器
+    // ------------------------------------------------------------------
+
+    /**
+     * 开始睡眠定时器，到点自动暂停。
+     *
+     * 计时只活在 ViewModel 里，进程被杀就失效 —— 对一个前台播放器够用了。
+     */
+    fun startSleepTimer(minutes: Int) {
+        if (released) return
+        sleepTimerJob?.cancel()
+        val endAt = System.currentTimeMillis() + minutes * 60_000L
+        _uiState.update { it.copy(sleepTimerRemainingMs = minutes * 60_000L) }
+        sleepTimerJob = viewModelScope.launch {
+            while (!released) {
+                val remain = endAt - System.currentTimeMillis()
+                if (remain <= 0L) {
+                    player?.pause()
+                    _uiState.update { it.copy(sleepTimerRemainingMs = 0L) }
+                    return@launch
+                }
+                _uiState.update { it.copy(sleepTimerRemainingMs = remain) }
+                delay(1_000L)
+            }
+        }
+    }
+
+    fun cancelSleepTimer() {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        _uiState.update { it.copy(sleepTimerRemainingMs = 0L) }
+    }
+
     /** 按扩展名判定字幕格式；不认识的返回 null，由调用方提示用户。 */
     private fun subtitleMimeOf(displayName: String): String? =
         when (displayName.substringAfterLast('.', "").lowercase()) {
@@ -562,6 +677,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
         released = true
         persistPosition()
         progressJob?.cancel()
+        sleepTimerJob?.cancel()
         volumeController.release()
         positionPersister.release()
         audioFocus.release()
@@ -594,6 +710,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
     // ------------------------------------------------------------------
     // Player.Listener
     // ------------------------------------------------------------------
+
+    override fun onTracksChanged(tracks: Tracks) {
+        refreshAudioTracks()
+    }
 
     override fun onPlaybackStateChanged(playbackState: Int) {
         _uiState.update {

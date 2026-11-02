@@ -15,7 +15,7 @@
 | 播放内核 | `androidx.media3:media3-exoplayer` + `media3-ui` 1.4.1 |
 | 数据层 | Room 2.6.1（KSP）、WorkManager 2.9.1、Coil 2.7.0（coil-compose + coil-video） |
 | Gradle | AGP 8.5.2 / Gradle 8.7 / Kotlin 2.0.21 / JVM 17 |
-| release APK | `VideoPlayer-1.1.0-release.apk`，约 7.3 MB（含 3.6 MB 开场动画），APK Signature Scheme v2 |
+| release APK | `VideoPlayer-1.1.1-release.apk`，约 7.3 MB（含 3.6 MB 开场动画），APK Signature Scheme v2 |
 
 ---
 
@@ -39,6 +39,8 @@
 | **启动动画（v1.0.7）** | `SplashActivity.kt` + `res/raw/splash_intro.mp4` | 冷启动全屏静音播放 15 秒 720p 开场动画；播完 / 点击任意处 / 「跳过」按钮 / 播放出错 / 20 秒超时 五种方式进入主界面 |
 | **画中画（v1.1.0）** | `PlayerTopBar` 的 PiP 按钮 + `MainActivity.onPictureInPictureModeChanged` | Android 8.0+，`enterPictureInPictureMode` 固定 9:16；PiP 里通过 `LocalPipMode` 隐藏全部控件 |
 | **左半屏亮度手势（v1.1.0）** | `ui/player/PlayerGestures.kt` | 上下滑动时按落点分左右：左调 `window.attributes.screenBrightness`，右调媒体音量；不动系统设置 |
+| **音轨切换（v1.1.1）** | `PlayerViewModel.selectAudioTrack` + `PlayerControls.AudioTrackButton` | 多音轨视频底栏出现音轨按钮，列出语言/轨道名/声道数；`TrackSelectionOverride` 只覆盖音频类型，视频轨与字幕不受影响 |
+| **睡眠定时器（v1.1.1）** | `PlayerViewModel.startSleepTimer` + `PlayerControls.SleepTimerButton` | 15/30/45/60 分钟预设，到点自动暂停；计时中顶栏变成「N分」胶囊 |
 | **长按 2 倍速（v1.1.0）** | `PlayerViewModel.toggleSpeedBoost()` | 长按画面在 2x / 1x 间切换，**不写偏好**，退出播放页仍用设置里的倍速 |
 | 播放/暂停、点画面切换 | `PlayerViewModel.togglePlayPause()` / `PlayerScreen` | 单击＝控件可见时切换、控件隐藏时先唤出；双击＝直接切换 |
 | 暂停时中央大播放按钮 | `PlayerControls.CenterPlayButton` | 76dp `FilledIconButton`，仅在暂停且控件可见时显示 |
@@ -74,7 +76,7 @@
 ```
 视频播放器/                                  ← 工作区根目录
 ├── README.md                               ← 本文档
-├── VideoPlayer-1.1.0-release.apk           ← 已构建好的签名安装包（约 7.3 MB，含开场动画）
+├── VideoPlayer-1.1.1-release.apk           ← 已构建好的签名安装包（约 7.3 MB，含开场动画）
 ├── CHANGELOG.md                            ← 版本变更记录（v1.0.0 → v1.1.0）
 ├── .github/workflows/android.yml           ← CI：单测 + assembleRelease + 产物上传
 ├── scripts/test-local.ps1                  ← 本地跑单测的绕行脚本（中文路径 → %TEMP%）
@@ -153,7 +155,8 @@
 │               ├── raw/splash_intro.mp4    ★ 开场动画（15s / 720p / 静音，3.6 MB）
 │               ├── drawable/               ic_pause / ic_volume_{up,down,off} /
 │               │                           ic_fullscreen{,_exit} / ic_speed /
-│               │                           ic_subtitles / ic_pip / bg_splash_skip /
+│               │                           ic_subtitles / ic_pip / ic_audiotrack /
+│               │                           ic_timer / bg_splash_skip /
 │               │                           ic_launcher_foreground
 │               ├── mipmap-*/               ic_launcher(.round) 各密度图标
 │               ├── mipmap-anydpi-v26/      adaptive-icon 定义

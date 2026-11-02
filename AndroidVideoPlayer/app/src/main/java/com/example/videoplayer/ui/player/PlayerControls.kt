@@ -49,6 +49,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.videoplayer.R
+import com.example.videoplayer.player.AudioTrackOption
 import com.example.videoplayer.player.PlayerUiState
 import com.example.videoplayer.player.PlayerViewModel
 import com.example.videoplayer.player.VolumeLevel
@@ -61,6 +62,9 @@ fun PlayerTopBar(
     title: String,
     onBack: () -> Unit,
     onEnterPip: (() -> Unit)? = null,
+    sleepTimerRemainingMs: Long = 0L,
+    onSleepTimerPick: (Int) -> Unit = {},
+    onSleepTimerCancel: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -92,6 +96,11 @@ fun PlayerTopBar(
                 .weight(1f, fill = false)
                 .padding(end = 8.dp)
         )
+        SleepTimerButton(
+            remainingMs = sleepTimerRemainingMs,
+            onPick = onSleepTimerPick,
+            onCancel = onSleepTimerCancel
+        )
         if (onEnterPip != null) {
             IconButton(onClick = onEnterPip) {
                 Icon(
@@ -117,6 +126,7 @@ fun PlayerBottomBar(
     onSubtitleClick: () -> Unit,
     onSubtitlePick: () -> Unit,
     onSubtitleClear: () -> Unit,
+    onAudioTrackSelected: (Int) -> Unit,
     onToggleFullscreen: () -> Unit,
     onSeek: (Long) -> Unit,
     onInteract: () -> Unit,
@@ -161,6 +171,13 @@ fun PlayerBottomBar(
             )
 
             Spacer(modifier = Modifier.weight(1f))
+
+            if (state.audioTracks.size > 1) {
+                AudioTrackButton(
+                    tracks = state.audioTracks,
+                    onSelected = { onAudioTrackSelected(it); onInteract() }
+                )
+            }
 
             SubtitleButton(
                 active = state.subtitleName != null,
@@ -284,6 +301,110 @@ private fun VolumeButton(level: VolumeLevel, onClick: () -> Unit) {
             contentDescription = label,
             tint = Color.White
         )
+    }
+}
+
+/**
+ * 音轨切换按钮。
+ *
+ * 只在视频自带多条音轨时由调用方决定是否展示；当前选中的那条右侧打勾。
+ */
+@Composable
+private fun AudioTrackButton(
+    tracks: List<AudioTrackOption>,
+    onSelected: (Int) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(
+                painter = painterResource(R.drawable.ic_audiotrack),
+                contentDescription = "切换音轨，共 ${tracks.size} 条",
+                tint = Color.White
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            tracks.forEach { track ->
+                DropdownMenuItem(
+                    text = { Text(track.label) },
+                    leadingIcon = if (track.isSelected) {
+                        {
+                            Icon(
+                                imageVector = Icons.Filled.Check,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                    onClick = {
+                        expanded = false
+                        onSelected(track.index)
+                    }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 睡眠定时器按钮。
+ *
+ * 未激活时是普通计时图标；激活后变成主题色的「N分」胶囊，点开可以改时长或取消。
+ */
+@Composable
+private fun SleepTimerButton(
+    remainingMs: Long,
+    onPick: (Int) -> Unit,
+    onCancel: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val active = remainingMs > 0L
+    // 向上取整：剩 10 秒也显示「1分」，避免一直停在 0
+    val minutes = ((remainingMs + 59_999L) / 60_000L).toInt()
+
+    Box {
+        if (active) {
+            TextButton(onClick = { expanded = true }) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_timer),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.size(4.dp))
+                Text(text = "${minutes}分", color = MaterialTheme.colorScheme.primary)
+            }
+        } else {
+            IconButton(onClick = { expanded = true }) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_timer),
+                    contentDescription = "设置睡眠定时器",
+                    tint = Color.White
+                )
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            listOf(15, 30, 45, 60).forEach { m ->
+                DropdownMenuItem(
+                    text = { Text("$m 分钟后停止") },
+                    onClick = {
+                        expanded = false
+                        onPick(m)
+                    }
+                )
+            }
+            if (active) {
+                DropdownMenuItem(
+                    text = { Text("取消定时") },
+                    onClick = {
+                        expanded = false
+                        onCancel()
+                    }
+                )
+            }
+        }
     }
 }
 

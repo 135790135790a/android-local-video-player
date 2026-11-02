@@ -312,6 +312,15 @@ fun PlayerScreen(
                             Toast.makeText(context, "当前系统版本不支持画中画", Toast.LENGTH_SHORT).show()
                         }
                     },
+                    sleepTimerRemainingMs = state.sleepTimerRemainingMs,
+                    onSleepTimerPick = {
+                        viewModel.startSleepTimer(it)
+                        poke()
+                    },
+                    onSleepTimerCancel = {
+                        viewModel.cancelSleepTimer()
+                        poke()
+                    },
                     modifier = Modifier.align(Alignment.TopCenter)
                 )
 
@@ -325,6 +334,7 @@ fun PlayerScreen(
                     onSubtitleClick = { subtitlePicker.launch(arrayOf("*/*")) },
                     onSubtitlePick = { subtitlePicker.launch(arrayOf("*/*")) },
                     onSubtitleClear = viewModel::detachSubtitle,
+                    onAudioTrackSelected = viewModel::selectAudioTrack,
                     onToggleFullscreen = {
                         activity?.requestedOrientation = if (isLandscape) {
                             ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
