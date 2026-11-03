@@ -8,14 +8,14 @@
 | 项目 | 值 |
 | --- | --- |
 | 包名 / applicationId | `com.example.videoplayer` |
-| versionCode / versionName | `11` / `1.1.0` |
+| versionCode / versionName | `13` / `1.1.2` |
 | minSdk / targetSdk / compileSdk | `24` / `34` / `34` |
 | 语言 / UI | Kotlin + Jetpack Compose + Material 3 |
 | 架构 | MVVM（`AndroidViewModel` + `StateFlow`）+ Room + WorkManager |
 | 播放内核 | `androidx.media3:media3-exoplayer` + `media3-ui` 1.4.1 |
 | 数据层 | Room 2.6.1（KSP）、WorkManager 2.9.1、Coil 2.7.0（coil-compose + coil-video） |
 | Gradle | AGP 8.5.2 / Gradle 8.7 / Kotlin 2.0.21 / JVM 17 |
-| release APK | `VideoPlayer-1.1.1-release.apk`，约 7.3 MB（含 3.6 MB 开场动画），APK Signature Scheme v2 |
+| release APK | `VideoPlayer-1.1.2-release.apk`，约 7.3 MB（含 3.6 MB 开场动画），APK Signature Scheme v2 |
 
 ---
 
@@ -35,12 +35,14 @@
 | **连播（v1.0.5）** | `ui/library/LibraryScreen` 传队列 → `PlayerViewModel.playlist` | 从媒体库点开时携带当前筛选/排序后的队列，播完自动下一条；队尾或下一条文件丢失则停在当前页 |
 | **媒体库搜索 + 排序（v1.0.5）** | `ui/library/LibraryViewModel.kt`（`setQuery` / `setSort`） | 标题/路径/编码关键词 250ms 防抖过滤；最近导入/名称/大小/时长四维排序，选择存 SharedPreferences |
 | **后台播放（v1.0.5）** | `player/PlaybackService.kt` + `MediaController` | 播放器归 Service 所有，UI 通过 `MediaController` 连接；通知栏/锁屏/耳机键与界面操作同一个播放器 |
-| **外挂字幕（v1.0.6）** | `PlayerViewModel.attachSubtitle` + `VideoSurface` 字幕样式 | 支持 `.srt` / `.vtt` / `.ass` / `.ssa`，走 ExoPlayer 自带解析器；从当前位置重载不跳回开头，关闭只禁用文本轨不重载 |
+| **外挂字幕（v1.0.6）** | `player/TrackController.attachSubtitle` + `VideoSurface` 字幕样式 | 支持 `.srt` / `.vtt` / `.ass` / `.ssa`，走 ExoPlayer 自带解析器；从当前位置重载不跳回开头，关闭只禁用文本轨不重载 |
 | **启动动画（v1.0.7）** | `SplashActivity.kt` + `res/raw/splash_intro.mp4` | 冷启动全屏静音播放 15 秒 720p 开场动画；播完 / 点击任意处 / 「跳过」按钮 / 播放出错 / 20 秒超时 五种方式进入主界面 |
 | **画中画（v1.1.0）** | `PlayerTopBar` 的 PiP 按钮 + `MainActivity.onPictureInPictureModeChanged` | Android 8.0+，`enterPictureInPictureMode` 固定 9:16；PiP 里通过 `LocalPipMode` 隐藏全部控件 |
 | **左半屏亮度手势（v1.1.0）** | `ui/player/PlayerGestures.kt` | 上下滑动时按落点分左右：左调 `window.attributes.screenBrightness`，右调媒体音量；不动系统设置 |
-| **音轨切换（v1.1.1）** | `PlayerViewModel.selectAudioTrack` + `PlayerControls.AudioTrackButton` | 多音轨视频底栏出现音轨按钮，列出语言/轨道名/声道数；`TrackSelectionOverride` 只覆盖音频类型，视频轨与字幕不受影响 |
+| **音轨切换（v1.1.1）** | `player/TrackController.selectAudioTrack` + `PlayerControls.AudioTrackButton` | 多音轨视频底栏出现音轨按钮，列出语言/轨道名/声道数；`TrackSelectionOverride` 只覆盖音频类型，视频轨与字幕不受影响 |
 | **睡眠定时器（v1.1.1）** | `PlayerViewModel.startSleepTimer` + `PlayerControls.SleepTimerButton` | 15/30/45/60 分钟预设，到点自动暂停；计时中顶栏变成「N分」胶囊 |
+| **按视频记忆字幕与倍速（v1.1.2）** | `PlayerViewModel.applySavedPreferences` + `VideoEntity.subtitleUri/playbackSpeed` | 媒体库条目记住上次挂的字幕文件与倍速，再打开自动套用；数据库 v2 → v3 迁移新增三列，老记录维持「无字幕、1 倍速」 |
+| **A-B 循环（v1.1.2）** | `PlayerViewModel.markRepeatPoint` + `PlayerControls.RepeatButton` | 点击三态：标 A → 标 B 并跳回 A 开始循环 → 清除；`syncProgress` 每 250ms 检查越过 B 点即 seek 回 A |
 | **长按 2 倍速（v1.1.0）** | `PlayerViewModel.toggleSpeedBoost()` | 长按画面在 2x / 1x 间切换，**不写偏好**，退出播放页仍用设置里的倍速 |
 | 播放/暂停、点画面切换 | `PlayerViewModel.togglePlayPause()` / `PlayerScreen` | 单击＝控件可见时切换、控件隐藏时先唤出；双击＝直接切换 |
 | 暂停时中央大播放按钮 | `PlayerControls.CenterPlayButton` | 76dp `FilledIconButton`，仅在暂停且控件可见时显示 |
@@ -76,7 +78,7 @@
 ```
 视频播放器/                                  ← 工作区根目录
 ├── README.md                               ← 本文档
-├── VideoPlayer-1.1.1-release.apk           ← 已构建好的签名安装包（约 7.3 MB，含开场动画）
+├── VideoPlayer-1.1.2-release.apk           ← 已构建好的签名安装包（约 7.3 MB，含开场动画）
 ├── CHANGELOG.md                            ← 版本变更记录（v1.0.0 → v1.1.0）
 ├── .github/workflows/android.yml           ← CI：单测 + assembleRelease + 产物上传
 ├── scripts/test-local.ps1                  ← 本地跑单测的绕行脚本（中文路径 → %TEMP%）
@@ -124,6 +126,7 @@
 │           │   │   ├── PlaybackErrorMapper.kt  PlaybackException → 中文提示
 │           │   │   ├── PlaybackService.kt      v1.0.5 MediaSessionService，持有 ExoPlayer + MediaSession
 │           │   │   ├── PlayerViewModel.kt      ★ 播放器状态机（MediaController 连接服务）
+│           │   │   ├── TrackController.kt      v1.1.2 音轨切换 + 外挂字幕
 │           │   │   └── PositionPersister.kt    v1.0.5 播放位置独立落库
 │           │   ├── ui/
 │           │   │   ├── AppRoot.kt          首页（媒体库 / 相册 两个 Tab）+ 播放页切换
@@ -186,7 +189,7 @@
 | `build.gradle.kts`（根） | 三个插件 `alias(...) apply false`：android application、kotlin android、kotlin compose（Kotlin 2.0 起 Compose 编译器独立成插件） |
 | `gradle.properties` | `-Xmx2048m`、`parallel`、`caching`、`useAndroidX`、`nonTransitiveRClass`；另加 `org.gradle.vfs.watch=false`（沙箱环境文件监听会报 error 5）与 `android.overridePathCheck=true`（工程路径含中文） |
 | `gradle/libs.versions.toml` | 版本目录：agp 8.5.2、kotlin 2.0.21、composeBom 2024.09.03、media3 **1.4.1**（1.5+ 要求 compileSdk 35，不能升） |
-| `app/build.gradle.kts` | `versionCode 7` / `versionName "1.0.6"`；`signingConfigs.release` 从 `keystore.properties` 读四要素；release 开 `isMinifyEnabled + isShrinkResources` + `proguard-android-optimize.txt`；**没有 keystore.properties 时自动回退 debug 签名**，保证任何人 clone 都能 `assembleRelease`；`compileOptions`/`jvmTarget` 都 17 |
+| `app/build.gradle.kts` | 顶部 `appVersionCode = 13` / `appVersionName = "1.1.2"`（defaultConfig 与 mapping 归档共用）；`signingConfigs.release` 从 `keystore.properties` 读四要素；release 开 `isMinifyEnabled + isShrinkResources` + `proguard-android-optimize.txt`；**没有 keystore.properties 时自动回退 debug 签名**，保证任何人 clone 都能 `assembleRelease`；`compileOptions`/`jvmTarget` 都 17 |
 | `app/proguard-rules.pro` | keep `androidx.media3.exoplayer.**`、`common.**`、`extractor.**`、`decoder.**`、`datasource.**`，keep `Renderer` 实现类，`keepattributes Annotation/Signature/InnerClasses`，`-dontwarn androidx.media3.**`（可选依赖缺失告警） |
 | `keystore.properties` | `storeFile=keystore/release.keystore`、`storePassword`/`keyPassword=videoplayer123`、`keyAlias=videoplayer`。**正式发布务必换成自己的密码并排除出版本库** |
 | `keystore/release.keystore` | 测试用自签名证书：RSA 2048、SHA256withRSA、有效期 10000 天、`CN=Video Player Demo` |
@@ -225,7 +228,8 @@
 | `ui/player/PlayerControls.kt` | `PlayerTopBar`、`PlayerBottomBar`（进度条在上、按钮在下）、`ProgressRow`（Slider + Canvas 缓冲线）、`VolumeButton`（三档图标）、`SpeedButton`（窄屏只留图标）、`CenterPlayButton`、`PlayerErrorDialog` |
 | `ui/player/PlayerGestures.kt` | `GestureLayer`：水平拖动累计 ≥48dp 且横向为主 → 松手 `onSeekBy(±10s)`；垂直每 26dp 一格 → `onVolumeStep`；拖动中气泡提示，松手 800ms 消失 |
 | `ui/player/VideoSurface.kt` | `AndroidView` 里 inflate `player_view.xml`，`player` 在 factory/update 两处赋值，`onRelease` 置 null 防泄漏 |
-| `player/PlayerViewModel.kt` | 核心。v1.0.5 起不再持有 ExoPlayer，改为 `MediaController` 异步连接 `PlaybackService`（`val player: Player?`）；`PlayerUiState`；`VideoSource{SAF,GALLERY,RECENT,LIBRARY}`；`PreflightBlock`；`openLibraryVideo(video, queue)` 用本地 `File` 播放、跳过预检、带连播队列；方法：`openVideo/retry/playAnyway/dismissPreflightBlock/togglePlayPause/seekTo/seekBy/setSpeed/cycleVolume/onHostStart/onHostStop/releasePlayer` |
+| `player/PlayerViewModel.kt` | 核心。v1.0.5 起不再持有 ExoPlayer，改为 `MediaController` 异步连接 `PlaybackService`（`val player: Player?`）；`PlayerUiState`；`VideoSource{SAF,GALLERY,RECENT,LIBRARY}`；`PreflightBlock`；`openLibraryVideo(video, queue)` 用本地 `File` 播放、跳过预检、带连播队列；`applySavedPreferences` 套用该片上次的字幕与倍速；`markRepeatPoint/clearRepeatPoints` 管 A-B 循环；方法：`openVideo/retry/playAnyway/dismissPreflightBlock/togglePlayPause/seekTo/seekBy/setSpeed/cycleVolume/onHostStart/onHostStop/releasePlayer` |
+| `player/TrackController.kt` | v1.1.2 从 ViewModel 拆出：音轨列表解析（`audioTracks`）、音轨切换（`selectAudioTrack`，`TrackSelectionOverride` 只覆盖音频类型）、外挂字幕挂载/关闭（`attachSubtitle` / `detachSubtitle`）。`playerProvider: () -> Player?` 现取播放器，不持有已释放对象；`AudioTrackOption` 与此同文件 |
 | `player/AudioFocusController.kt`（v1.0.5） | 音频焦点集中管理：`AudioFocusRequest` + `AudioManager.OnAudioFocusChangeListener`，GAIN / LOSS / LOSS_TRANSIENT / LOSS_TRANSIENT_CAN_DUCK 四分支，短暂丢失后按需续播 |
 | `player/PositionPersister.kt`（v1.0.5） | 播放位置落库：`Dispatchers.IO` 专用 scope + `@Volatile boundId`，播放中每 5 秒 / 离开页面 / 播完归零；ViewModel 销毁不影响最后一次写入 |
 | `player/PlaybackService.kt`（v1.0.5） | `MediaSessionService`，**自己创建 ExoPlayer** 并配 `MediaSession`（`setSessionActivity` 指向启动页）；`onGetSession` 返回会话；`onTaskRemoved` 暂停 + `stopSelf`；`onDestroy` 释放 session 与 player |
@@ -463,7 +467,7 @@ $bt = "$root\_tools\sdk\build-tools\34.0.0"
 Verifies
 Verified using v2 scheme (APK Signature Scheme v2): true
 Signer #1 certificate DN: CN=Video Player Demo, OU=Demo, O=Demo, L=Beijing, ST=Beijing, C=CN
-package: name='com.example.videoplayer' versionCode='7' versionName='1.0.6' compileSdkVersion='34'
+package: name='com.example.videoplayer' versionCode='13' versionName='1.1.2' compileSdkVersion='34'
 sdkVersion:'24'  targetSdkVersion:'34'
 uses-permission: name='android.permission.MODIFY_AUDIO_SETTINGS'
 uses-permission: name='android.permission.READ_MEDIA_VIDEO'

@@ -43,6 +43,15 @@ data class VideoEntity(
     val checksum: String = "",
     /** 源文件的修改时间，参与去重键 */
     val lastModified: Long = 0L,
+    /**
+     * 上次给这部片挂过的外挂字幕（content:// Uri），null 表示没挂过。
+     * 再次打开时自动挂回去，用户不用每次重新选。
+     */
+    val subtitleUri: String? = null,
+    /** 字幕文件名，用于播放页展示；与 [subtitleUri] 同生共死 */
+    val subtitleName: String? = null,
+    /** 上次用的播放倍速，1.0 为常规速度 */
+    val playbackSpeed: Float = 1f,
     /** READY 可播放；SOURCE_LOST 迁移时源已失效，保留条目供用户删除 */
     val status: String = Status.READY
 ) {

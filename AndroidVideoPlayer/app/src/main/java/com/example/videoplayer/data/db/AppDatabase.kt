@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [VideoEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -32,6 +32,21 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v2 -> v3：新增「这部片上次用的字幕」和「上次的倍速」。
+         *
+         * 三列都可空/带默认值，老记录升级后等于「没挂过字幕、1 倍速」，行为不变。
+         */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE videos ADD COLUMN subtitleUri TEXT")
+                db.execSQL("ALTER TABLE videos ADD COLUMN subtitleName TEXT")
+                db.execSQL(
+                    "ALTER TABLE videos ADD COLUMN playbackSpeed REAL NOT NULL DEFAULT 1.0"
+                )
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -42,7 +57,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     DB_NAME
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { instance = it }
             }

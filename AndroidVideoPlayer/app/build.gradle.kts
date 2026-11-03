@@ -15,8 +15,8 @@ val keystoreProps = Properties().apply {
 }
 
 /** 版本号集中在这里，defaultConfig 和 mapping 归档都用它，避免两处不一致。 */
-val appVersionCode = 12
-val appVersionName = "1.1.1"
+val appVersionCode = 13
+val appVersionName = "1.1.2"
 
 android {
     namespace = "com.example.videoplayer"

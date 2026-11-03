@@ -127,6 +127,7 @@ fun PlayerBottomBar(
     onSubtitlePick: () -> Unit,
     onSubtitleClear: () -> Unit,
     onAudioTrackSelected: (Int) -> Unit,
+    onRepeatClick: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onSeek: (Long) -> Unit,
     onInteract: () -> Unit,
@@ -178,6 +179,12 @@ fun PlayerBottomBar(
                     onSelected = { onAudioTrackSelected(it); onInteract() }
                 )
             }
+
+            RepeatButton(
+                repeatA = state.repeatA,
+                repeatB = state.repeatB,
+                onClick = { onRepeatClick(); onInteract() }
+            )
 
             SubtitleButton(
                 active = state.subtitleName != null,
@@ -342,6 +349,43 @@ private fun AudioTrackButton(
                         expanded = false
                         onSelected(track.index)
                     }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A-B 循环打点按钮。
+ *
+ * 一次点「标 A」、再点「标 B 并开始循环」、第三次「清除」。激活时图标点亮并在右上角
+ * 加一个小圆点，配合 contentDescription 也能被读屏正确描述。
+ */
+@Composable
+private fun RepeatButton(
+    repeatA: Long?,
+    repeatB: Long?,
+    onClick: () -> Unit
+) {
+    val active = repeatA != null
+    val tint = if (active) MaterialTheme.colorScheme.primary else Color.White
+    IconButton(onClick = onClick) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                painter = painterResource(R.drawable.ic_repeat),
+                contentDescription = when {
+                    repeatB != null -> "清除 A-B 循环"
+                    repeatA != null -> "标记 B 点并开始循环"
+                    else -> "标记 A-B 循环起点"
+                },
+                tint = tint
+            )
+            if (active) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(8.dp)
+                        .background(tint, CircleShape)
                 )
             }
         }

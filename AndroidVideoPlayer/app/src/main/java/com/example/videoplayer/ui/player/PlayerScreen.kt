@@ -335,6 +335,7 @@ fun PlayerScreen(
                     onSubtitlePick = { subtitlePicker.launch(arrayOf("*/*")) },
                     onSubtitleClear = viewModel::detachSubtitle,
                     onAudioTrackSelected = viewModel::selectAudioTrack,
+                    onRepeatClick = viewModel::markRepeatPoint,
                     onToggleFullscreen = {
                         activity?.requestedOrientation = if (isLandscape) {
                             ActivityInfo.SCREEN_ORIENTATION_PORTRAIT

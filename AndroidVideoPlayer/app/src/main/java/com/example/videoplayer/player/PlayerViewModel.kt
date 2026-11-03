@@ -48,15 +48,6 @@ enum class VideoSource { SAF, GALLERY, RECENT, LIBRARY }
 /** 播放前的预检拦截结论，等用户决定是否仍然强播。 */
 data class PreflightBlock(val reason: String, val detail: String)
 
-/**
- * 一条可选的音轨。
- *
- * @param index 在「音频轨组列表」中的下标，不是 TrackGroup 的全局下标
- * @param label 展示用文案，例如「中文 · 立体声」
- * @param isSelected 当前是否正在使用
- */
-data class AudioTrackOption(val index: Int, val label: String, val isSelected: Boolean)
-
 data class PlayerUiState(
     val videoName: String = "",
     val videoUri: String = "",
@@ -84,7 +75,11 @@ data class PlayerUiState(
     /** 可切换的音轨；只有一条时不展示切换入口 */
     val audioTracks: List<AudioTrackOption> = emptyList(),
     /** 睡眠定时器剩余毫秒，0 表示未激活 */
-    val sleepTimerRemainingMs: Long = 0L
+    val sleepTimerRemainingMs: Long = 0L,
+    /** A-B 循环的 A 点（毫秒），null 表示未标记 */
+    val repeatA: Long? = null,
+    /** A-B 循环的 B 点；A 和 B 都在时才真正循环 */
+    val repeatB: Long? = null
 )
 
 /**
@@ -135,9 +130,13 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
     /** 进度续播：只有播放媒体库条目时才记 id，SAF/相册来源没有数据库记录 */
     private val dao = AppDatabase.get(application).videoDao()
     private val positionPersister = PositionPersister(dao)
+    /** 音轨与外挂字幕的轨道层逻辑，集中放在 TrackController 里，ViewModel 只做转发 */
+    private val trackController = TrackController { player }
     /** 连播队列：从媒体库点开时传入当前筛选/排序后的列表 */
     private var playlist: List<VideoEntity> = emptyList()
     private var playlistIndex = -1
+    /** 当前播放的媒体库条目；SAF/相册来源为 null，此时不写任何「按片记忆」的偏好 */
+    private var currentVideo: VideoEntity? = null
     private var pendingSeekMs = 0L
     private var lastPersistAt = 0L
 
@@ -202,6 +201,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
         // 非媒体库来源不记续播位置；LIBRARY 走「重试」时保留，续播信息不能丢
         if (source != VideoSource.LIBRARY) {
             positionPersister.bind(null)
+            currentVideo = null
             pendingSeekMs = 0L
         }
         // 先把占位状态同步推给 UI：播放页立即进入 loading，而不是闪一下空白
@@ -277,6 +277,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
             return
         }
         positionPersister.bind(video.id)
+        currentVideo = video
         playlist = queue.filter { it.isPlayable }
         playlistIndex = playlist.indexOfFirst { it.id == video.id }
         pendingSeekMs = video.lastPositionMs
@@ -290,6 +291,34 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
             durationMs = video.durationMs
         )
         prepareVideo(Uri.fromFile(file), meta, silentAudio = false)
+        applySavedPreferences(video)
+    }
+
+    /**
+     * 把媒体库条目上次的播放偏好（倍速、字幕）应用回播放器。
+     *
+     * 只在从媒体库点开时调用：SAF / 相册来源没有数据库记录，每次都是全新播放。
+     */
+    private fun applySavedPreferences(video: VideoEntity) {
+        if (released) return
+        if (video.playbackSpeed != 1f) {
+            player?.setPlaybackSpeed(video.playbackSpeed)
+            _uiState.update { it.copy(speed = video.playbackSpeed) }
+        }
+        val subUri = video.subtitleUri
+        val subName = video.subtitleName
+        if (subUri.isNullOrBlank() || subName.isNullOrBlank()) return
+        // attachSubtitle 依赖 currentMediaItem，它要等 prepare 之后才存在，这里轮询等一小会儿
+        viewModelScope.launch {
+            var waited = 0
+            while (!released && player?.currentMediaItem == null && waited < 5_000) {
+                delay(100L)
+                waited += 100
+            }
+            if (!released && player?.currentMediaItem != null) {
+                attachSubtitle(Uri.parse(subUri), subName)
+            }
+        }
     }
 
     private fun prepareVideo(
@@ -319,7 +348,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
                 durationMs = meta.durationMs,
                 positionMs = 0L,
                 bufferedMs = 0L,
-                subtitleName = null
+                subtitleName = null,
+                repeatA = null,
+                repeatB = null
             )
         }
 
@@ -404,34 +435,16 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
      */
     fun attachSubtitle(uri: Uri, displayName: String) {
         if (released) return
-        val mime = subtitleMimeOf(displayName)
-        if (mime == null) {
+        if (!trackController.attachSubtitle(uri, displayName)) {
             Toast.makeText(app, "只支持 .srt / .vtt / .ass / .ssa 字幕文件", Toast.LENGTH_LONG).show()
             return
         }
-        val p = player ?: return
-        val current = p.currentMediaItem ?: return
-        val position = p.currentPosition.coerceAtLeast(0L)
-        val wasPlaying = p.isPlaying
-
-        val subtitle = MediaItem.SubtitleConfiguration.Builder(uri)
-            .setMimeType(mime)
-            .setLanguage("zh")
-            // 挂上就自动选中，用户不用再去轨道菜单里挑
-            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-            .build()
-        val rebuilt = current.buildUpon()
-            .setSubtitleConfigurations(listOf(subtitle))
-            .build()
-
-        // 之前「关闭字幕」可能把文本轨禁掉了，重新挂载时要放开
-        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-            .build()
-        p.setMediaItem(rebuilt, position)
-        p.prepare()
-        if (wasPlaying) p.play()
         _uiState.update { it.copy(subtitleName = displayName) }
+        currentVideo?.let { video ->
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching { dao.updateSubtitle(video.id, uri.toString(), displayName) }
+            }
+        }
     }
 
     /**
@@ -441,11 +454,13 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
      */
     fun detachSubtitle() {
         if (released) return
-        val p = player ?: return
-        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-            .build()
+        trackController.detachSubtitle()
         _uiState.update { it.copy(subtitleName = null) }
+        currentVideo?.let { video ->
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching { dao.updateSubtitle(video.id, null, null) }
+            }
+        }
     }
 
     // ------------------------------------------------------------------
@@ -460,56 +475,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
      */
     fun selectAudioTrack(index: Int) {
         if (released) return
-        val p = player ?: return
-        val groups = p.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
-        val group = groups.getOrNull(index)?.mediaTrackGroup ?: return
-        runCatching {
-            p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
-                .setOverrideForType(TrackSelectionOverride(group, listOf(0)))
-                .build()
-        }
+        trackController.selectAudioTrack(index)
         refreshAudioTracks()
     }
 
     /** 从播放器当前状态重建音轨列表 */
     private fun refreshAudioTracks() {
         if (released) return
-        val p = player ?: return
-        val options = p.currentTracks.groups
-            .filter { it.type == C.TRACK_TYPE_AUDIO }
-            .mapIndexed { index, group ->
-                AudioTrackOption(
-                    index = index,
-                    label = audioLabel(group.mediaTrackGroup.getFormat(0)),
-                    isSelected = group.isSelected
-                )
-            }
-        _uiState.update { it.copy(audioTracks = options) }
-    }
-
-    /** 音轨文案：优先用容器里的轨道名，其次语言，最后补声道数 */
-    private fun audioLabel(format: Format): String {
-        val name = format.label?.takeIf { it.isNotBlank() }
-        val lang = format.language?.takeIf { it.isNotBlank() }?.let(::languageName)
-        val head = listOfNotNull(name, lang).distinct().joinToString(" · ").ifBlank { "默认音轨" }
-        return when (format.channelCount) {
-            0 -> head
-            1 -> "$head · 单声道"
-            2 -> "$head · 立体声"
-            else -> "$head · ${format.channelCount} 声道"
-        }
-    }
-
-    private fun languageName(code: String): String = when (code.substringBefore('-').lowercase()) {
-        "zh" -> "中文"
-        "en" -> "英语"
-        "ja" -> "日语"
-        "ko" -> "韩语"
-        "fr" -> "法语"
-        "de" -> "德语"
-        "es" -> "西班牙语"
-        "ru" -> "俄语"
-        else -> code
+        _uiState.update { it.copy(audioTracks = trackController.audioTracks()) }
     }
 
     // ------------------------------------------------------------------
@@ -545,15 +518,6 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
         sleepTimerJob = null
         _uiState.update { it.copy(sleepTimerRemainingMs = 0L) }
     }
-
-    /** 按扩展名判定字幕格式；不认识的返回 null，由调用方提示用户。 */
-    private fun subtitleMimeOf(displayName: String): String? =
-        when (displayName.substringAfterLast('.', "").lowercase()) {
-            "srt" -> MimeTypes.APPLICATION_SUBRIP
-            "vtt" -> MimeTypes.TEXT_VTT
-            "ass", "ssa" -> MimeTypes.TEXT_SSA
-            else -> null
-        }
 
     // ------------------------------------------------------------------
     // 播放控制
@@ -601,11 +565,50 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
         seekTo((player?.currentPosition ?: 0L) + deltaMs)
     }
 
+    /**
+     * A-B 循环打点：第一次按标 A，第二次按标 B，第三次按清空。
+     *
+     * B 必须比 A 晚至少 1 秒，否则当作误触不记；标完 B 立刻跳回 A 开始循环。
+     */
+    fun markRepeatPoint() {
+        if (released) return
+        val p = player ?: return
+        val position = p.currentPosition.coerceAtLeast(0L)
+        val state = _uiState.value
+        val a = state.repeatA
+        val b = state.repeatB
+        when {
+            a == null -> _uiState.update { it.copy(repeatA = position, repeatB = null) }
+
+            b == null -> {
+                if (position <= a + 1_000L) {
+                    Toast.makeText(app, "B 点要比 A 点晚至少 1 秒", Toast.LENGTH_SHORT).show()
+                    return
+                }
+                _uiState.update { it.copy(repeatB = position) }
+                p.seekTo(a)
+            }
+
+            else -> _uiState.update { it.copy(repeatA = null, repeatB = null) }
+        }
+    }
+
+    /** 把 A-B 标记清掉（菜单里的「取消循环」） */
+    fun clearRepeatPoints() {
+        if (released) return
+        _uiState.update { it.copy(repeatA = null, repeatB = null) }
+    }
+
     fun setSpeed(speed: Float) {
         if (released) return
         player?.setPlaybackSpeed(speed)
         _uiState.update { it.copy(speed = speed) }
         prefs.edit().putFloat(KEY_SPEED, speed).apply()
+        currentVideo?.let { video ->
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching { dao.updateSpeed(video.id, speed) }
+            }
+        }
     }
 
     /**
@@ -788,6 +791,13 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
         val safeDuration = if (duration == C.TIME_UNSET || duration < 0) 0L else duration
         val position = p.currentPosition.coerceAtLeast(0L)
         val buffered = p.bufferedPosition.coerceAtLeast(0L)
+        // A-B 循环：播过 B 点立刻跳回 A 点，来回只在区间内转
+        val state = _uiState.value
+        val a = state.repeatA
+        val b = state.repeatB
+        if (a != null && b != null && b > a && position >= b) {
+            p.seekTo(a)
+        }
         _uiState.update { current ->
             current.copy(
                 durationMs = if (safeDuration > 0) safeDuration else current.durationMs,

@@ -41,6 +41,14 @@ interface VideoDao {
     @Query("UPDATE videos SET status = :status WHERE id = :id")
     suspend fun updateStatus(id: Long, status: String)
 
+    /** 记住这部片用过的字幕；传 null 表示用户关掉了字幕 */
+    @Query("UPDATE videos SET subtitleUri = :uri, subtitleName = :name WHERE id = :id")
+    suspend fun updateSubtitle(id: Long, uri: String?, name: String?)
+
+    /** 记住这部片上次的倍速 */
+    @Query("UPDATE videos SET playbackSpeed = :speed WHERE id = :id")
+    suspend fun updateSpeed(id: Long, speed: Float)
+
     @Query("DELETE FROM videos WHERE id = :id")
     suspend fun deleteById(id: Long)
 

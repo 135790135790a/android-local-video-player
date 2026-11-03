@@ -4,6 +4,28 @@
 
 ---
 
+## [1.1.2] - 2026-11-03
+
+versionCode: 13 · versionName: 1.1.2
+
+「少重复操作」的一版：记住每部片的字幕与倍速、A-B 循环，并拆掉播放器里最厚的一块逻辑。
+
+### Added
+
+- **按视频记住字幕与倍速**：从媒体库打开的片子会记住上次挂的字幕文件和播放倍速，下次点开自动套用，不用每次重选。数据库新增 `subtitleUri` / `subtitleName` / `playbackSpeed` 三列（v2 → v3 迁移，老记录默认「无字幕、1 倍速」）。
+- **A-B 循环**：底栏新增循环按钮，第一次点标 A 点、第二次点标 B 点并立即跳回 A 开始循环、第三次点清除。B 点必须比 A 点晚至少 1 秒，否则不记并提示。
+
+### Changed
+
+- **拆出 `TrackController`**：音轨列表解析、音轨切换、外挂字幕挂载/关闭从 `PlayerViewModel` 移到独立的 `TrackController`，播放器实例通过 `playerProvider` 现取，避免持有已释放对象。`PlayerViewModel` 从 921 行降到 780 行左右，`AudioTrackOption` 一并迁出。
+- 换片时 A-B 标记自动清空，不会把上一部片的区间带到下一部。
+
+### Fixed
+
+- 无。
+
+---
+
 ## [1.1.1] - 2026-11-02
 
 versionCode: 12 · versionName: 1.1.1
